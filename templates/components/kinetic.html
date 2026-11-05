@@ -18,3 +18,5 @@ tl.fromTo("#%%ID%%-swoosh", { strokeDashoffset: swooshLen, opacity: 0 }, { strok
 // slow push-in during the hold so the frame never sits dead still
 tl.to("#%%ID%%", { scale: 1.02, transformOrigin: "50% 50%", duration: Math.max(1, E - S - 2.5), ease: "none" }, S + 2.0);
 tl.to("#%%ID%%", { opacity: 0, duration: 0.4, ease: "power1.inOut" }, E - 0.4);
+// hard kill: guarantee the beat is hidden at E even if a word tween conflicts
+tl.set("#%%ID%%", { opacity: 0 }, E);

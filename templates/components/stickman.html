@@ -58,3 +58,5 @@ tl.to("#%%ID%%-object", { scaleY: %%STRETCH_SCALE%%, svgOrigin: "430 1500", dura
 tl.fromTo("#%%ID%%-stretch", { opacity: 0 }, { opacity: 1, duration: 0.5 }, S + 4.4);
 tl.fromTo("#%%ID%%-note", { opacity: 0 }, { opacity: 1, duration: 0.4 }, S + 4.7);
 tl.to("#%%ID%%", { opacity: 0, duration: 0.4, ease: "power1.inOut" }, E - 0.4);
+// hard kill: guarantee the beat is hidden at E even if a word tween conflicts
+tl.set("#%%ID%%", { opacity: 0 }, E);

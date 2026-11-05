@@ -26,7 +26,10 @@ document.querySelectorAll("#%%ID%% .series-line").forEach(function (path, si) {
     } }, S + 0.4 + si * 1.4);
   tl.fromTo(dot, { opacity: 0 }, { opacity: 1, duration: 0.3 }, S + 0.5 + si * 1.4);
   tl.to(dot, { opacity: 0, duration: 0.3 }, S + 0.4 + si * 1.4 + drawDur);
+  tl.set(dot, { opacity: 0 }, S + 0.4 + si * 1.4 + drawDur + 0.3);
   tl.fromTo("#%%ID%%-peak-" + si, { opacity: 0, scale: 0.7, transformOrigin: "0% 100%" }, { opacity: 1, scale: 1, duration: 0.4, ease: "back.out(2)" }, S + 0.4 + si * 1.4 + drawDur + 0.2);
 });
 tl.fromTo("#%%ID%% .caption-line", { opacity: 0, y: 12 }, { opacity: 1, y: 0, duration: 0.5 }, E - 3.5);
 tl.to("#%%ID%%", { opacity: 0, duration: 0.4, ease: "power1.inOut" }, E - 0.4);
+// hard kill: guarantee the beat is hidden at E even if a word tween conflicts
+tl.set("#%%ID%%", { opacity: 0 }, E);
