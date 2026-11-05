@@ -287,9 +287,6 @@ NVIDIA_MODELS = [
     "nvidia/nemotron-3.5-lightning-30b-a3b",
     "nvidia/nemotron-3-ultra-550b-a55b",
     "deepseek-ai/deepseek-v4.1-flash",
-    "openai/gpt-oss-20b",
-    "google/gemma-4-31b-it",
-    "meta/llama-3.2-11b-vision-instruct",
 ]
 
 
@@ -298,8 +295,10 @@ def call_nvidia(key, topic):
     # prototyping-only per NVIDIA's own FAQ, so this is a fallback leg,
     # never the primary brain. Which models a key can use varies by
     # account, so try several in order; a 404 means that model is not
-    # available to this account. Override the list with NVIDIA_MODELS
-    # (comma-separated) or a single model with NVIDIA_MODEL.
+    # available to this account, and a timeout means it hung, so move
+    # to the next model instead of abandoning the leg. Override the
+    # list with NVIDIA_MODELS (comma-separated) or a single model with
+    # NVIDIA_MODEL.
     models = os.environ.get("NVIDIA_MODELS")
     if models:
         candidates = [m.strip() for m in models.split(",") if m.strip()]
@@ -307,7 +306,7 @@ def call_nvidia(key, topic):
         candidates = [os.environ["NVIDIA_MODEL"]]
     else:
         candidates = NVIDIA_MODELS
-    last_404 = None
+    last_error = None
     for model in candidates:
         try:
             return _post_json(
@@ -323,15 +322,21 @@ def call_nvidia(key, topic):
                     "response_format": {"type": "json_object"},
                     "temperature": 0.7,
                 },
+                timeout=45,
             )["choices"][0]["message"]["content"]
         except ProviderFailure as e:
             if "HTTP 404" in str(e):
                 print(f"  nvidia model {model} not available to this "
                       "account", flush=True)
-                last_404 = e
+                last_error = e
                 continue
             raise
-    raise last_404 if last_404 else ProviderFailure("no NVIDIA model answered")
+        except (TimeoutError, OSError) as e:
+            print(f"  nvidia model {model} timed out, trying next",
+                  flush=True)
+            last_error = ProviderFailure(f"timeout on {model}: {e}")
+            continue
+    raise last_error if last_error else ProviderFailure("no NVIDIA model answered")
 
 
 def call_local(_key, topic):
@@ -392,56 +397,76 @@ def _parse_json(text):
         obj = json.loads(m.group(0))
     if isinstance(obj, str):
         obj = json.loads(obj)
+    if isinstance(obj, list) and len(obj) == 1 and isinstance(obj[0], dict):
+        obj = obj[0]
     return obj
 
 
 def draft(topic):
     """Try each provider in turn, each key in turn, until one returns a
-    valid draft."""
+    valid draft. A key that returns bad JSON gets a second chance on a
+    later pass, because the failure is the model's output, not the key.
+    A key that fails auth or rate limits is not retried."""
     last_error = "no providers configured"
     for name, env_name, fn in PROVIDERS:
         keys = _keys_for(env_name)
         if env_name and not keys:
             print(f"  {name}: no keys in {env_name}, skipped", flush=True)
             continue
-        for ki, key in enumerate(keys):
-            label = (
-                f"{name} key {ki + 1}/{len(keys)}"
-                if len(keys) > 1
-                else name
-            )
-            print(f"trying brain: {label}", flush=True)
-            try:
-                text = fn(key, topic)
-            except KeyFailure as e:
-                print(f"  {label} failed ({e}), trying next key", flush=True)
-                last_error = f"{label}: {e}"
-                continue
-            except ProviderFailure as e:
-                print(f"  {name} failed: {e}", flush=True)
-                last_error = f"{name}: {e}"
-                break
-            except Exception as e:  # noqa: BLE001 - rotation survives anything
-                print(f"  {name} failed unexpectedly: {e}", flush=True)
-                last_error = f"{name}: {e}"
-                break
-            try:
-                obj = _parse_json(text)
-            except json.JSONDecodeError as e:
-                print(f"  {label} returned invalid JSON: {e}", flush=True)
-                last_error = f"{label} returned invalid JSON"
-                continue
-            problems = validate_output(obj)
-            if problems:
-                print(f"  {label} draft failed validation:", flush=True)
-                for p in problems:
-                    print(f"    - {p}", flush=True)
-                last_error = (
-                    f"{label} draft failed validation: {problems[0]}"
+        dead_keys = set()
+        for pass_no in range(2):
+            provider_down = False
+            for ki, key in enumerate(keys):
+                if ki in dead_keys:
+                    continue
+                label = (
+                    f"{name} key {ki + 1}/{len(keys)}"
+                    if len(keys) > 1
+                    else name
                 )
-                continue
-            print(f"  {label} produced a valid draft", flush=True)
-            return obj, name
+                if pass_no:
+                    label += f" (retry {pass_no + 1})"
+                print(f"trying brain: {label}", flush=True)
+                try:
+                    text = fn(key, topic)
+                except KeyFailure as e:
+                    print(f"  {label} failed ({e}), trying next key", flush=True)
+                    last_error = f"{label}: {e}"
+                    dead_keys.add(ki)
+                    continue
+                except ProviderFailure as e:
+                    print(f"  {name} failed: {e}", flush=True)
+                    last_error = f"{name}: {e}"
+                    provider_down = True
+                    break
+                except Exception as e:  # noqa: BLE001 - rotation survives anything
+                    print(f"  {name} failed unexpectedly: {e}", flush=True)
+                    last_error = f"{name}: {e}"
+                    provider_down = True
+                    break
+                try:
+                    obj = _parse_json(text)
+                except json.JSONDecodeError as e:
+                    print(f"  {label} returned invalid JSON: {e}", flush=True)
+                    print(f"  raw reply (first 400 chars): {text[:400]!r}",
+                          flush=True)
+                    last_error = f"{label} returned invalid JSON"
+                    continue
+                problems = validate_output(obj)
+                if problems:
+                    print(f"  {label} draft failed validation:", flush=True)
+                    for p in problems:
+                        print(f"    - {p}", flush=True)
+                    print(f"  raw reply (first 400 chars): {text[:400]!r}",
+                          flush=True)
+                    last_error = (
+                        f"{label} draft failed validation: {problems[0]}"
+                    )
+                    continue
+                print(f"  {label} produced a valid draft", flush=True)
+                return obj, name
+            if provider_down:
+                break
     raise RuntimeError(f"all brain providers failed, last error: {last_error}")
 
 
