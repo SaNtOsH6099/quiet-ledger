@@ -66,27 +66,43 @@ Add them in the repo: Settings, Secrets and variables, Actions, New
 repository secret. The Groq and Gemini secrets are the ones that
 matter; NVIDIA is a fallback and can be added later.
 
-### 2. A Google service account and a Drive folder
+### 2. Google Drive access (OAuth as you)
 
-The jobs read the queue and file finished work through a service
-account, which is a robot account that only touches the one folder you
-share with it:
+A service account cannot create files in a personal Drive folder
+(it has no storage quota of its own), so the jobs sign in as you
+instead, using OAuth. The token is long-lived because the app is
+published to Production.
 
 1. Go to console.cloud.google.com and create a project (any name).
 2. In that project, open APIs and Services, Library, search for
    Google Drive API, and enable it.
-3. Open IAM and Admin, Service Accounts, Create service account.
-   Give it any name, then click it open.
-4. On the Keys tab, Add key, Create new key, JSON. A file downloads.
-   That file is the service account key. Keep it private.
-5. In Drive, create a folder for this system. Right-click it, Share,
-   and share it with the service account's email address (it ends in
-   `iam.gserviceaccount.com`). Give it Editor access.
-6. Open the folder and copy the folder id from the address bar: it is
-   the long string after `folders/` in the URL.
-7. In the repo, add two secrets: `DRIVE_SERVICE_ACCOUNT_JSON` with the
-   entire contents of the downloaded JSON file pasted in, and
-   `DRIVE_FOLDER_ID` with the folder id from step 6.
+3. Open APIs and Services, OAuth consent screen (now called Google
+   Auth Platform). Set User Type to External, app name
+   quiet-ledger, your Gmail as support and developer contact. On the
+   Branding page, fill in the App domain: home page is this repo's
+   URL, privacy policy link is the `PRIVACY.md` file in this repo
+   (raw.githubusercontent.com URL). Then publish the app
+   (Audience, Publishing status, Publish app). Publishing stops the
+   token expiring after 7 days.
+4. On the same Auth Platform page, open Clients, Create Client,
+   type Web application, name quiet-ledger-web. Under Authorized
+   redirect URIs add `https://developers.google.com/oauthplayground`
+   and Create. Copy the Client ID and Client Secret.
+5. Open developers.google.com/oauthplayground. Tap the gear, tick
+   "Use your own OAuth credentials", paste the Client ID and
+   Secret, Close. In "Input your own scopes" type
+   `https://www.googleapis.com/auth/drive` and tap Authorize APIs.
+   Sign in with the Google account that owns the Drive, tap
+   Advanced, "Go to quiet-ledger (unsafe)", Allow. Then tap
+   "Exchange authorization code for tokens" and copy the Refresh
+   token.
+6. In Drive, create a folder for this system. Open it and copy the
+   folder id from the address bar: the long string after `folders/`
+   in the URL.
+7. In the repo, add two secrets: `DRIVE_OAUTH_JSON` with
+   `{"client_id": "...", "client_secret": "...", "refresh_token": "..."}`
+   (paste your three values in), and `DRIVE_FOLDER_ID` with the
+   folder id from step 6.
 
 ### 3. The queue file
 
@@ -117,7 +133,7 @@ posted. Only `approved` entries are built.
 
 ## What you provide vs what is already built
 
-You provide: the keys above, the service account, the Drive folder,
+You provide: the keys above, the OAuth login, the Drive folder,
 the topics, and the approval of each script. Everything else in this
 repo is already built: the draft step with its four-way rotation, the
 narration, the five drawn scene types, captions, assembly, the
