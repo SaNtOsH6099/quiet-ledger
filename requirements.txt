@@ -2,6 +2,7 @@
 # (see requirements-*.txt) to keep each job light.
 kokoro==0.9.4
 faster-whisper==1.2.1
+av==18.1.0
 soundfile==0.14.0
 numpy==2.5.4
 Pillow==11.3.0

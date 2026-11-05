@@ -1,1 +1,7 @@
 faster-whisper==1.2.1
+# PyAV 19 removed the metadata_errors kwarg that faster-whisper 1.2.1
+# still passes to av.open(), so transcription crashes with
+# "open() got an unexpected keyword argument 'metadata_errors'".
+# Pin to 18.1.0 (confirmed working with 1.2.1) until a faster-whisper
+# release ships the upstream fix.
+av==18.1.0
