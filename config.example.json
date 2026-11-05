@@ -1,0 +1,1 @@
+{"brain_fallbacks":["gemini","nvidia","local"],"brain_provider":"groq","drive_folder_id":"YOUR_DRIVE_FOLDER_ID","github_owner":"YOUR_GITHUB_USERNAME","github_repo":"quiet-ledger","loudness_lufs":-23,"output_fps":30,"output_height":1920,"output_width":1080,"voice":"af_heart","voice_speed":0.8}

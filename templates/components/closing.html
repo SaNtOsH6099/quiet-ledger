@@ -1,0 +1,35 @@
+<!-- closing beat. Placeholders: %%ID%% %%START%% %%DURATION%% %%LINES_HTML%% %%SUB%%.
+     A small drawn sun motif, then the closing lines build word by word. -->
+<div id="%%ID%%" class="beat clip" data-start="%%START%%" data-duration="%%DURATION%%" data-track-index="4">
+  <svg width="1080" height="1920" style="position:absolute;inset:0;overflow:visible;">
+    <g stroke="#d9481f" stroke-width="7" stroke-linecap="round" fill="none">
+      <circle id="%%ID%%-sun-core" cx="880" cy="330" r="52" />
+      <g id="%%ID%%-sun-rays">
+        <line class="sun-ray" x1="880" y1="248" x2="880" y2="222" />
+        <line class="sun-ray" x1="880" y1="412" x2="880" y2="438" />
+        <line class="sun-ray" x1="798" y1="330" x2="772" y2="330" />
+        <line class="sun-ray" x1="962" y1="330" x2="988" y2="330" />
+        <line class="sun-ray" x1="822" y1="272" x2="804" y2="254" />
+        <line class="sun-ray" x1="938" y1="272" x2="956" y2="254" />
+        <line class="sun-ray" x1="822" y1="388" x2="804" y2="406" />
+        <line class="sun-ray" x1="938" y1="388" x2="956" y2="406" />
+      </g>
+    </g>
+  </svg>
+%%LINES_HTML%%
+  <div class="close-sub" style="top: 1100px;">%%SUB%%</div>
+</div>
+<!--TIMELINE-->
+tl.fromTo("#%%ID%%", { opacity: 0 }, { opacity: 1, duration: 0.4, ease: "power1.inOut" }, S);
+prepDraw(document.getElementById("%%ID%%-sun-core"));
+document.querySelectorAll("#%%ID%% .sun-ray").forEach(function (el) { prepDraw(el); });
+tl.fromTo("#%%ID%%-sun-core", { strokeDashoffset: dashLen("#%%ID%%-sun-core") },
+  { strokeDashoffset: 0, duration: 0.35, ease: "power2.inOut" }, S + 0.15);
+document.querySelectorAll("#%%ID%% .sun-ray").forEach(function (el, i) {
+  tl.fromTo(el, { strokeDashoffset: el.getTotalLength() },
+    { strokeDashoffset: 0, duration: 0.35, ease: "power2.inOut" }, S + 0.15 + (i + 1) * 0.06);
+});
+document.querySelectorAll("#%%ID%% .close-line").forEach(function (line, li) {
+  tl.fromTo(line.querySelectorAll(".w"), { x: 70, opacity: 0 }, { x: 0, opacity: 1, duration: 0.32, stagger: 0.11 }, S + 0.2 + li * 0.5);
+});
+tl.fromTo("#%%ID%% .close-sub", { opacity: 0, y: 12 }, { opacity: 1, y: 0, duration: 0.5 }, S + 1.6);

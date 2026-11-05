@@ -1,0 +1,23 @@
+<!-- diagram beat: a process drawn one part at a time, each with a label.
+     Placeholders: %%ID%% %%START%% %%DURATION%% %%TITLE%% %%PARTS_SVG%% %%PART_COUNT%%.
+     Parts are SVG paths with labels, supplied in the beat data. -->
+<div id="%%ID%%" class="beat clip" data-start="%%START%%" data-duration="%%DURATION%%" data-track-index="3">
+  <div class="diagram-title" style="top: 200px;">%%TITLE%%</div>
+  <svg width="1080" height="1920" style="position:absolute;inset:0;overflow:visible;">
+%%PARTS_SVG%%
+  </svg>
+</div>
+<!--TIMELINE-->
+tl.fromTo("#%%ID%%", { opacity: 0 }, { opacity: 1, duration: 0.4, ease: "power1.inOut" }, S);
+tl.fromTo("#%%ID%% .diagram-title", { opacity: 0, y: 12 }, { opacity: 1, y: 0, duration: 0.4 }, S + 0.1);
+// each part draws in turn, its label fading in beside it
+for (var pi = 0; pi < %%PART_COUNT%%; pi++) {
+  (function (i) {
+    var part = document.getElementById("%%ID%%-part-" + i);
+    var len = prepDraw(part);
+    var t = S + 0.5 + i * 1.1;
+    tl.fromTo(part, { strokeDashoffset: len }, { strokeDashoffset: 0, duration: 0.8, ease: "power2.inOut" }, t);
+    tl.fromTo("#%%ID%%-label-" + i, { opacity: 0 }, { opacity: 1, duration: 0.4 }, t + 0.5);
+  })(pi);
+}
+tl.to("#%%ID%%", { opacity: 0, duration: 0.4, ease: "power1.inOut" }, E - 0.4);

@@ -1,0 +1,10 @@
+# Everything, for local runs. The jobs install only the slice they need
+# (see requirements-*.txt) to keep each job light.
+kokoro==0.9.4
+faster-whisper==1.2.1
+soundfile==0.14.0
+numpy==2.5.4
+Pillow==11.3.0
+requests==2.34.2
+google-api-python-client==2.181.0
+google-auth==2.41.1

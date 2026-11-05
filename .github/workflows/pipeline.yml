@@ -1,0 +1,310 @@
+# quiet-ledger: draft the words, draw the scenes, narrate, assemble,
+# file the finished piece in Drive.
+#
+# Two modes, chosen by the `stage` input (manual runs) or the schedule:
+#   draft  - take one topic, draft the script and scene plan, save it in
+#            the queue as script-ready. A person reviews and approves it.
+#   render - take the next approved queue entry and run it all the way
+#            through: narration, drawn scenes, captions, assembly,
+#            thumbnail, Drive upload.
+# The daily schedule runs in render mode. Nothing renders without an
+# approved entry, and the schedule exits quietly when there is none.
+#
+# Approval is the human gate between the two modes, so the draft job is
+# NOT a `needs` dependency of the render chain: the render chain reads
+# the approved script from the queue in Drive instead.
+name: quiet-ledger
+
+on:
+  workflow_dispatch:
+    inputs:
+      topic:
+        description: "Topic to draft (draft mode), or leave empty to use the next queue idea"
+        required: false
+        type: string
+      queue_id:
+        description: "Queue entry id to render (render mode), or leave empty for the next approved entry"
+        required: false
+        type: string
+      stage:
+        description: "draft = write the script only; render = build the finished file"
+        required: true
+        default: draft
+        type: choice
+        options: [draft, render]
+  schedule:
+    - cron: "30 3 * * *" # 09:00 IST daily, render mode
+
+permissions:
+  contents: read
+
+concurrency:
+  group: quiet-ledger
+  cancel-in-progress: false
+
+env:
+  HF_VERSION: 0.8.188
+
+jobs:
+  draft:
+    name: draft the script and scene plan
+    if: github.event_name == 'workflow_dispatch' && inputs.stage == 'draft'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: resolve the topic
+        id: topic
+        env:
+          TOPIC_INPUT: ${{ inputs.topic }}
+          DRIVE_SERVICE_ACCOUNT_JSON: ${{ secrets.DRIVE_SERVICE_ACCOUNT_JSON }}
+          DRIVE_FOLDER_ID: ${{ secrets.DRIVE_FOLDER_ID }}
+        run: |
+          python3 - <<'PY'
+          import json, os, subprocess, sys
+          topic = os.environ.get("TOPIC_INPUT", "").strip()
+          entry_id = ""
+          if not topic:
+              r = subprocess.run([sys.executable, "scripts/queue.py", "next", "--status", "idea"],
+                                 capture_output=True, text=True)
+              if r.returncode != 0:
+                  print("no topic given and no 'idea' entry in the queue", file=sys.stderr)
+                  print(r.stderr, file=sys.stderr)
+                  sys.exit(1)
+              entry = json.loads(r.stdout)
+              topic, entry_id = entry["topic"], str(entry["id"])
+          print(f"topic: {topic}")
+          with open(os.environ["GITHUB_OUTPUT"], "a") as f:
+              f.write(f"topic={topic}\n")
+              f.write(f"entry_id={entry_id}\n")
+          PY
+      - name: draft with the brain
+        env:
+          GROQ_API_KEYS: ${{ secrets.GROQ_API_KEYS }}
+          GEMINI_API_KEYS: ${{ secrets.GEMINI_API_KEYS }}
+          NVIDIA_API_KEYS: ${{ secrets.NVIDIA_API_KEYS }}
+        run: python3 scripts/draft.py "${{ steps.topic.outputs.topic }}" out
+      - uses: actions/upload-artifact@v4
+        with:
+          name: draft
+          path: out/
+          if-no-files-found: error
+          retention-days: 7
+      - name: save the draft in the queue as script-ready
+        env:
+          DRIVE_SERVICE_ACCOUNT_JSON: ${{ secrets.DRIVE_SERVICE_ACCOUNT_JSON }}
+          DRIVE_FOLDER_ID: ${{ secrets.DRIVE_FOLDER_ID }}
+        run: |
+          if [ -n "${{ steps.topic.outputs.entry_id }}" ]; then
+            ID="${{ steps.topic.outputs.entry_id }}"
+          else
+            ID=$(python3 scripts/queue.py add --topic "${{ steps.topic.outputs.topic }}" | python3 -c "import json,sys; print(json.load(sys.stdin)['id'])")
+          fi
+          python3 scripts/queue.py update --id "$ID" --status script-ready --script-file out/script.json
+          echo "queue_id=$ID" >> "$GITHUB_OUTPUT"
+
+  voice:
+    name: narrate (one continuous take)
+    if: github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.stage == 'render')
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: install speech tools
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq espeak-ng
+          python3 -m pip install -q -r requirements-voice.txt
+      - name: fetch the approved entry
+        id: entry
+        env:
+          QUEUE_ID_INPUT: ${{ inputs.queue_id }}
+          DRIVE_SERVICE_ACCOUNT_JSON: ${{ secrets.DRIVE_SERVICE_ACCOUNT_JSON }}
+          DRIVE_FOLDER_ID: ${{ secrets.DRIVE_FOLDER_ID }}
+        run: |
+          python3 - <<'PY'
+          import json, os, subprocess, sys
+          qid = os.environ.get("QUEUE_ID_INPUT", "").strip()
+          cmd = [sys.executable, "scripts/queue.py"]
+          cmd += ["get", "--id", qid] if qid else ["next", "--status", "approved"]
+          r = subprocess.run(cmd, capture_output=True, text=True)
+          if r.returncode != 0:
+              if "no queue entry with status" in r.stderr:
+                  print("no approved queue entry to render, exiting quietly")
+                  sys.exit(0)
+              print("queue read failed", file=sys.stderr)
+              print(r.stderr, file=sys.stderr)
+              sys.exit(1)
+          entry = json.loads(r.stdout)
+          if not entry.get("script"):
+              print(f"queue entry {entry['id']} is approved but has no "
+                    "script; run the draft stage first", file=sys.stderr)
+              sys.exit(1)
+          os.makedirs("out", exist_ok=True)
+          with open("out/script.json", "w") as f:
+              json.dump(entry["script"], f, indent=2)
+          meta = {"queue_id": entry["id"], "topic": entry["topic"]}
+          with open("out/meta.json", "w") as f:
+              json.dump(meta, f, indent=2)
+          print(f"rendering entry {entry['id']}: {entry['topic']}")
+          PY
+      - name: mark the entry rendering
+        env:
+          DRIVE_SERVICE_ACCOUNT_JSON: ${{ secrets.DRIVE_SERVICE_ACCOUNT_JSON }}
+          DRIVE_FOLDER_ID: ${{ secrets.DRIVE_FOLDER_ID }}
+        run: |
+          ID=$(python3 -c "import json; print(json.load(open('out/meta.json'))['queue_id'])")
+          python3 scripts/queue.py update --id "$ID" --status rendering
+      - name: narrate
+        run: python3 scripts/voice.py --script out/script.json --out out/narration.wav
+      - uses: actions/upload-artifact@v4
+        with:
+          name: voice
+          path: out/
+          if-no-files-found: error
+          retention-days: 7
+
+  scenes:
+    name: draw the scenes
+    needs: voice
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: install transcription tools
+        run: python3 -m pip install -q -r requirements-scenes.txt
+      - uses: actions/download-artifact@v4
+        with:
+          name: voice
+          path: out/
+      - name: draw and render the scenes
+        run: python3 scripts/render.py --scenes out/script.json --audio out/narration.wav --templates templates --out-dir out --work-dir work/hf
+      - uses: actions/upload-artifact@v4
+        with:
+          name: scenes
+          path: out/
+          if-no-files-found: error
+          retention-days: 7
+
+  captions:
+    name: word-timed captions
+    needs: scenes
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/download-artifact@v4
+        with:
+          name: scenes
+          path: out/
+      - name: build the caption file
+        run: python3 scripts/captions.py --words out/words.json --script out/script.json --out out/captions.ass
+      - uses: actions/upload-artifact@v4
+        with:
+          name: captions
+          path: out/
+          if-no-files-found: error
+          retention-days: 7
+
+  assemble:
+    name: assemble the finished file
+    needs: captions
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: install caption font
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq fonts-noto-core
+      - uses: actions/download-artifact@v4
+        with:
+          name: voice
+          path: out/
+      - uses: actions/download-artifact@v4
+        with:
+          name: scenes
+          path: out/
+      - uses: actions/download-artifact@v4
+        with:
+          name: captions
+          path: out/
+      - name: assemble
+        run: |
+          TOTAL=$(python3 -c "import json; print(json.load(open('out/timings.json'))['total'])")
+          python3 scripts/assemble.py --video out/silent.mp4 --audio out/narration.wav --captions out/captions.ass --out out/final.mp4 --duration "$TOTAL"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: final
+          path: out/
+          if-no-files-found: error
+          retention-days: 7
+
+  thumbnail:
+    name: draw the thumbnail
+    needs: scenes
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: install image tools
+        run: python3 -m pip install -q -r requirements-thumbnail.txt
+      - uses: actions/download-artifact@v4
+        with:
+          name: scenes
+          path: out/
+      - name: draw the thumbnail
+        run: python3 scripts/thumbnail.py --script out/script.json --out out/thumbnail.png
+      - uses: actions/upload-artifact@v4
+        with:
+          name: thumbnail
+          path: out/
+          if-no-files-found: error
+          retention-days: 7
+
+  upload-drive:
+    name: file it in Drive
+    needs: [assemble, thumbnail]
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: install Drive tools
+        run: python3 -m pip install -q -r requirements-drive.txt
+      - uses: actions/download-artifact@v4
+        with:
+          name: final
+          path: out/
+      - uses: actions/download-artifact@v4
+        with:
+          name: thumbnail
+          path: out/
+      - name: upload and mark in-drive
+        env:
+          DRIVE_SERVICE_ACCOUNT_JSON: ${{ secrets.DRIVE_SERVICE_ACCOUNT_JSON }}
+          DRIVE_FOLDER_ID: ${{ secrets.DRIVE_FOLDER_ID }}
+        run: |
+          ID=$(python3 -c "import json; print(json.load(open('out/meta.json'))['queue_id'])")
+          TOPIC=$(python3 -c "import json; print(json.load(open('out/meta.json'))['topic'])")
+          python3 scripts/upload_drive.py --file out/final.mp4 --thumbnail out/thumbnail.png --queue-id "$ID" --topic "$TOPIC"

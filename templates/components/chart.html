@@ -1,0 +1,32 @@
+<!-- chart beat. Placeholders: %%ID%% %%START%% %%DURATION%% %%TITLE%% %%SUB%% %%CAPTION%% %%CHART_SVG%%.
+     The SVG (gridlines, axes, series lines, dots, peak labels) is built by
+     render.py from the series data, so any two series of numbers work. -->
+<div id="%%ID%%" class="beat clip" data-start="%%START%%" data-duration="%%DURATION%%" data-track-index="2">
+  <div class="chart-title" style="top: 170px;">%%TITLE%%</div>
+  <div class="chart-sub" style="top: 235px;">%%SUB%%</div>
+  <svg width="1080" height="1920" style="position:absolute;inset:0;overflow:visible;">
+%%CHART_SVG%%
+  </svg>
+  <div class="caption-line" style="top: 1420px;">%%CAPTION%%</div>
+</div>
+<!--TIMELINE-->
+tl.fromTo("#%%ID%%", { opacity: 0 }, { opacity: 1, duration: 0.4, ease: "power1.inOut" }, S);
+tl.fromTo("#%%ID%% .chart-title", { opacity: 0, y: 12 }, { opacity: 1, y: 0, duration: 0.4 }, S + 0.1);
+tl.fromTo("#%%ID%% .chart-sub", { opacity: 0, y: 12 }, { opacity: 1, y: 0, duration: 0.4 }, S + 0.25);
+// each series draws in turn; its dot rides the leading edge of the line
+document.querySelectorAll("#%%ID%% .series-line").forEach(function (path, si) {
+  var len = prepDraw(path);
+  var dot = document.getElementById(path.getAttribute("data-dot"));
+  var drawDur = Math.max(2, (E - S - 2) * 0.55);
+  tl.fromTo(path, { strokeDashoffset: len }, { strokeDashoffset: 0, duration: drawDur, ease: "none",
+    onUpdate: function () {
+      var p = 1 - parseFloat(path.style.strokeDashoffset) / len;
+      var pt = path.getPointAtLength(Math.max(0, p * len));
+      dot.setAttribute("cx", pt.x); dot.setAttribute("cy", pt.y);
+    } }, S + 0.4 + si * 1.4);
+  tl.fromTo(dot, { opacity: 0 }, { opacity: 1, duration: 0.3 }, S + 0.5 + si * 1.4);
+  tl.to(dot, { opacity: 0, duration: 0.3 }, S + 0.4 + si * 1.4 + drawDur);
+  tl.fromTo("#%%ID%%-peak-" + si, { opacity: 0, scale: 0.7, transformOrigin: "0% 100%" }, { opacity: 1, scale: 1, duration: 0.4, ease: "back.out(2)" }, S + 0.4 + si * 1.4 + drawDur + 0.2);
+});
+tl.fromTo("#%%ID%% .caption-line", { opacity: 0, y: 12 }, { opacity: 1, y: 0, duration: 0.5 }, E - 3.5);
+tl.to("#%%ID%%", { opacity: 0, duration: 0.4, ease: "power1.inOut" }, E - 0.4);

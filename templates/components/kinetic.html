@@ -1,0 +1,20 @@
+<!-- kinetic-text beat. Placeholders: %%ID%% %%START%% %%DURATION%% %%EYEBROW%% %%LINES_HTML%% %%SWOOSH_PATH%% -->
+<div id="%%ID%%" class="beat clip" data-start="%%START%%" data-duration="%%DURATION%%" data-track-index="1">
+  <div class="eyebrow" style="top: 470px;">%%EYEBROW%%</div>
+%%LINES_HTML%%
+  <svg width="1080" height="1920" style="position:absolute;inset:0;overflow:visible;">
+    <path id="%%ID%%-swoosh" d="%%SWOOSH_PATH%%"
+      fill="none" stroke="#d9481f" stroke-width="10" stroke-linecap="round" opacity="0" />
+  </svg>
+</div>
+<!--TIMELINE-->
+tl.fromTo("#%%ID%% .eyebrow", { opacity: 0, y: 14 }, { opacity: 1, y: 0, duration: 0.5 }, S + 0.15);
+// word-by-word build, line by line; whole phrase locks early, then holds
+document.querySelectorAll("#%%ID%% .hook-line").forEach(function (line, li) {
+  tl.fromTo(line.querySelectorAll(".w"), { x: 70, opacity: 0 }, { x: 0, opacity: 1, duration: 0.32, stagger: 0.11 }, S + 0.25 + li * 0.5);
+});
+var swooshLen = prepDraw(document.getElementById("%%ID%%-swoosh"));
+tl.fromTo("#%%ID%%-swoosh", { strokeDashoffset: swooshLen, opacity: 0 }, { strokeDashoffset: 0, opacity: 1, duration: 0.5, ease: "power2.inOut" }, S + 1.9);
+// slow push-in during the hold so the frame never sits dead still
+tl.to("#%%ID%%", { scale: 1.02, transformOrigin: "50% 50%", duration: Math.max(1, E - S - 2.5), ease: "none" }, S + 2.0);
+tl.to("#%%ID%%", { opacity: 0, duration: 0.4, ease: "power1.inOut" }, E - 0.4);

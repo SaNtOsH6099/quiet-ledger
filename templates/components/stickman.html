@@ -1,0 +1,60 @@
+<!-- stickman beat: a tall shape, a person for scale, and a stretch.
+     Placeholders: %%ID%% %%START%% %%DURATION%% %%OBJECT_LABEL%% %%PERSON_LABEL%%
+     %%STRETCH_LABEL%% %%NOTE%% %%STRETCH_SCALE%%.
+     The shape is a generic tall landmark drawn from straight lines; the
+     labels and the stretch amount come from the beat data. -->
+<div id="%%ID%%" class="beat clip" data-start="%%START%%" data-duration="%%DURATION%%" data-track-index="3">
+  <svg width="1080" height="1920" style="position:absolute;inset:0;overflow:visible;">
+    <line id="%%ID%%-ground" x1="80" y1="1500" x2="1000" y2="1500" stroke="#1c1c1c" stroke-width="4" stroke-linecap="round" />
+    <g id="%%ID%%-object" transform="translate(230,560)">
+      <path class="tower-part" d="M60,940 C120,700 180,520 200,60" fill="none" stroke="#1c1c1c" stroke-width="9" stroke-linecap="round" />
+      <path class="tower-part" d="M340,940 C280,700 220,520 200,60" fill="none" stroke="#1c1c1c" stroke-width="9" stroke-linecap="round" />
+      <path class="tower-part" d="M200,60 L200,8" fill="none" stroke="#1c1c1c" stroke-width="7" stroke-linecap="round" />
+      <g stroke="#1c1c1c" stroke-width="6" stroke-linecap="round">
+        <line class="tower-part" x1="95" y1="800" x2="305" y2="800" />
+        <line class="tower-part" x1="130" y1="640" x2="270" y2="640" />
+        <line class="tower-part" x1="158" y1="480" x2="242" y2="480" />
+        <line class="tower-part" x1="178" y1="340" x2="222" y2="340" />
+        <line class="tower-part" x1="95" y1="800" x2="130" y2="640" />
+        <line class="tower-part" x1="305" y1="800" x2="270" y2="640" />
+      </g>
+    </g>
+    <g id="%%ID%%-person" transform="translate(700,1240)" stroke="#d9481f" stroke-width="8" stroke-linecap="round" fill="none">
+      <circle class="sm-part" cx="100" cy="35" r="26" />
+      <path class="sm-part" d="M100,62 L100,150" />
+      <path class="sm-part" d="M55,92 L100,108 L145,92" />
+      <path class="sm-part" d="M100,150 L65,250 M100,150 L135,250" />
+    </g>
+    <g id="%%ID%%-stretch" opacity="0">
+      <line x1="620" y1="494" x2="620" y2="560" stroke="#d9481f" stroke-width="5" />
+      <path d="M620,486 L608,508 L632,508 Z" fill="#d9481f" />
+      <path d="M620,568 L608,546 L632,546 Z" fill="#d9481f" />
+      <text x="650" y="540" class="peak-label" fill="#d9481f">%%STRETCH_LABEL%%</text>
+    </g>
+    <text id="%%ID%%-object-label" class="scale-label" x="120" y="900" opacity="0">%%OBJECT_LABEL%%</text>
+    <text id="%%ID%%-person-label" class="scale-label" x="905" y="1330" opacity="0">%%PERSON_LABEL%%</text>
+    <text id="%%ID%%-note" class="note" x="540" y="1620" text-anchor="middle" opacity="0">%%NOTE%%</text>
+  </svg>
+</div>
+<!--TIMELINE-->
+tl.fromTo("#%%ID%%", { opacity: 0 }, { opacity: 1, duration: 0.4, ease: "power1.inOut" }, S);
+document.querySelectorAll("#%%ID%% .tower-part").forEach(function (el) { prepDraw(el); });
+document.querySelectorAll("#%%ID%% .sm-part").forEach(function (el) { prepDraw(el); });
+prepDraw(document.getElementById("%%ID%%-ground"));
+document.querySelectorAll("#%%ID%% .tower-part").forEach(function (el, i) {
+  tl.fromTo(el, { strokeDashoffset: el.getTotalLength() },
+    { strokeDashoffset: 0, duration: 0.45, ease: "power2.inOut" }, S + 0.1 + i * 0.14);
+});
+tl.fromTo("#%%ID%%-ground", { strokeDashoffset: dashLen("#%%ID%%-ground") },
+  { strokeDashoffset: 0, duration: 0.6, ease: "power2.inOut" }, S + 0.1);
+document.querySelectorAll("#%%ID%% .sm-part").forEach(function (el, i) {
+  tl.fromTo(el, { strokeDashoffset: el.getTotalLength() },
+    { strokeDashoffset: 0, duration: 0.35, ease: "power2.inOut" }, S + 0.4 + i * 0.12);
+});
+tl.fromTo("#%%ID%%-object-label", { opacity: 0 }, { opacity: 1, duration: 0.4 }, S + 1.9);
+tl.fromTo("#%%ID%%-person-label", { opacity: 0 }, { opacity: 1, duration: 0.4 }, S + 2.1);
+// the stretch: the shape grows from its base (SVG transform-origin at ground)
+tl.to("#%%ID%%-object", { scaleY: %%STRETCH_SCALE%%, svgOrigin: "430 1500", duration: 2.0, ease: "power2.inOut" }, S + 2.6);
+tl.fromTo("#%%ID%%-stretch", { opacity: 0 }, { opacity: 1, duration: 0.5 }, S + 4.4);
+tl.fromTo("#%%ID%%-note", { opacity: 0 }, { opacity: 1, duration: 0.4 }, S + 4.7);
+tl.to("#%%ID%%", { opacity: 0, duration: 0.4, ease: "power1.inOut" }, E - 0.4);
