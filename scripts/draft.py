@@ -207,6 +207,11 @@ class ProviderFailure(Exception):
     """The provider failed for a reason another key will not fix."""
 
 
+class RetryableFailure(Exception):
+    """The attempt failed but the provider and key are fine; try the
+    next key (or the same key again on a later pass)."""
+
+
 def _post_json(url, headers, payload, timeout=120):
     # Groq's API sits behind Cloudflare, whose edge blocks the default
     # Python user agent (HTTP 403, error code 1010). A browser user
@@ -234,6 +239,10 @@ def _post_json(url, headers, payload, timeout=120):
             body = e.read().decode("utf-8", "replace")[:500]
             if e.code in (401, 403, 429):
                 raise KeyFailure(f"HTTP {e.code}: {body}")
+            if e.code == 400 and "json_validate_failed" in body:
+                raise RetryableFailure(
+                    "HTTP 400: model output failed JSON validation"
+                )
             if e.code in (500, 502, 503, 504) and attempt < 2:
                 wait = 5 if attempt == 0 else 15
                 print(f"  transient HTTP {e.code}, retrying in {wait}s",
@@ -241,8 +250,15 @@ def _post_json(url, headers, payload, timeout=120):
                 time.sleep(wait)
                 continue
             raise ProviderFailure(f"HTTP {e.code}: {body}")
-        except urllib.error.URLError as e:
-            raise ProviderFailure(f"network error: {e}")
+        except OSError as e:
+            if attempt < 2:
+                wait = 5 if attempt == 0 else 15
+                print(f"  request failed ({e}), retrying in {wait}s",
+                      flush=True)
+                time.sleep(wait)
+                continue
+            raise ProviderFailure(f"request failed: {e}")
+    raise ProviderFailure("request failed after retries")
 
 
 def call_groq(key, topic):
@@ -258,6 +274,7 @@ def call_groq(key, topic):
             "reasoning_effort": "low",
             "response_format": {"type": "json_object"},
             "temperature": 0.7,
+            "max_completion_tokens": 8192,
         },
     )["choices"][0]["message"]["content"]
 
@@ -276,6 +293,7 @@ def call_gemini(key, topic):
             "generationConfig": {
                 "responseMimeType": "application/json",
                 "temperature": 0.7,
+                "maxOutputTokens": 8192,
             },
         },
     )
@@ -321,6 +339,7 @@ def call_nvidia(key, topic):
                     ],
                     "response_format": {"type": "json_object"},
                     "temperature": 0.7,
+                    "max_tokens": 8192,
                 },
                 timeout=45,
             )["choices"][0]["message"]["content"]
@@ -429,6 +448,10 @@ def draft(topic):
                 print(f"trying brain: {label}", flush=True)
                 try:
                     text = fn(key, topic)
+                except RetryableFailure as e:
+                    print(f"  {label} failed ({e}), trying next key", flush=True)
+                    last_error = f"{label}: {e}"
+                    continue
                 except KeyFailure as e:
                     print(f"  {label} failed ({e}), trying next key", flush=True)
                     last_error = f"{label}: {e}"
