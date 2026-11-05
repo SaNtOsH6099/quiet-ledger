@@ -22,26 +22,15 @@ def slugify(text):
     return slug[:60] or "untitled"
 
 
-def drive_service(key_file=None):
-    from google.oauth2 import service_account  # noqa: PLC0415
+def drive_service(key_file=None, oauth_file=None):
     from googleapiclient.discovery import build  # noqa: PLC0415
 
-    scopes = ["https://www.googleapis.com/auth/drive"]
-    if key_file:
-        creds = service_account.Credentials.from_service_account_file(
-            key_file, scopes=scopes
-        )
-    else:
-        blob = os.environ.get("DRIVE_SERVICE_ACCOUNT_JSON")
-        if not blob:
-            raise RuntimeError(
-                "no service account: set DRIVE_SERVICE_ACCOUNT_JSON "
-                "or pass --key-file"
-            )
-        creds = service_account.Credentials.from_service_account_info(
-            json.loads(blob), scopes=scopes
-        )
-    return build("drive", "v3", credentials=creds)
+    import queue as queue_mod  # noqa: PLC0415
+
+    return build(
+        "drive", "v3",
+        credentials=queue_mod.get_drive_credentials(key_file, oauth_file),
+    )
 
 
 def find_existing(service, name, folder_id):
@@ -90,11 +79,12 @@ def main():
     parser.add_argument("--queue-id", type=int, required=True)
     parser.add_argument("--topic", required=True)
     parser.add_argument("--key-file", default=None)
+    parser.add_argument("--oauth-file", default=None)
     parser.add_argument("--folder-id",
                         default=os.environ.get("DRIVE_FOLDER_ID"))
     args = parser.parse_args()
 
-    service = drive_service(args.key_file)
+    service = drive_service(args.key_file, args.oauth_file)
     base = f"{args.queue_id:03d} - {slugify(args.topic)}"
     main_file = upload(service, args.file, base + ".mp4", args.folder_id)
     if args.thumbnail:

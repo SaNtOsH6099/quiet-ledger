@@ -21,27 +21,66 @@ import sys
 QUEUE_NAME = "queue.json"
 
 
-def _drive_service(key_file=None):
+def get_drive_credentials(key_file=None, oauth_file=None):
+    """Credentials for the Drive API. Prefers OAuth as the user
+    (DRIVE_OAUTH_JSON), which owns files and uses the user's storage,
+    because a service account has no storage quota of its own and
+    cannot create files in a personal Drive. Falls back to the service
+    account (DRIVE_SERVICE_ACCOUNT_JSON / --key-file), which only works
+    in a Shared Drive."""
+    from google.oauth2 import credentials as oauth_credentials  # noqa: PLC0415
     from google.oauth2 import service_account  # noqa: PLC0415
-    from googleapiclient.discovery import build  # noqa: PLC0415
 
     scopes = ["https://www.googleapis.com/auth/drive"]
+    if oauth_file:
+        with open(oauth_file) as f:
+            info = json.load(f)
+        return oauth_credentials.Credentials(
+            None,
+            refresh_token=info["refresh_token"],
+            client_id=info["client_id"],
+            client_secret=info["client_secret"],
+            token_uri=info.get(
+                "token_uri", "https://oauth2.googleapis.com/token"
+            ),
+            scopes=scopes,
+        )
+    blob = os.environ.get("DRIVE_OAUTH_JSON")
+    if blob:
+        info = json.loads(blob)
+        return oauth_credentials.Credentials(
+            None,
+            refresh_token=info["refresh_token"],
+            client_id=info["client_id"],
+            client_secret=info["client_secret"],
+            token_uri=info.get(
+                "token_uri", "https://oauth2.googleapis.com/token"
+            ),
+            scopes=scopes,
+        )
     if key_file:
-        creds = service_account.Credentials.from_service_account_file(
+        return service_account.Credentials.from_service_account_file(
             key_file, scopes=scopes
         )
-    else:
-        blob = os.environ.get("DRIVE_SERVICE_ACCOUNT_JSON")
-        if not blob:
-            raise RuntimeError(
-                "no service account: set DRIVE_SERVICE_ACCOUNT_JSON "
-                "or pass --key-file"
-            )
-        info = json.loads(blob)
-        creds = service_account.Credentials.from_service_account_info(
-            info, scopes=scopes
+    blob = os.environ.get("DRIVE_SERVICE_ACCOUNT_JSON")
+    if not blob:
+        raise RuntimeError(
+            "no Drive auth: set DRIVE_OAUTH_JSON or "
+            "DRIVE_SERVICE_ACCOUNT_JSON, or pass --key-file"
         )
-    return build("drive", "v3", credentials=creds)
+    info = json.loads(blob)
+    return service_account.Credentials.from_service_account_info(
+        info, scopes=scopes
+    )
+
+
+def _drive_service(key_file=None, oauth_file=None):
+    from googleapiclient.discovery import build  # noqa: PLC0415
+
+    return build(
+        "drive", "v3",
+        credentials=get_drive_credentials(key_file, oauth_file),
+    )
 
 
 def _find_queue(service, folder_id):
@@ -96,7 +135,7 @@ def next_entry(queue, status):
 
 
 def cmd_next(args):
-    service = _drive_service(args.key_file)
+    service = _drive_service(args.key_file, args.oauth_file)
     queue, _ = load_queue(service, args.folder_id)
     entry = next_entry(queue, args.status)
     if not entry:
@@ -107,7 +146,7 @@ def cmd_next(args):
 
 
 def cmd_get(args):
-    service = _drive_service(args.key_file)
+    service = _drive_service(args.key_file, args.oauth_file)
     queue, _ = load_queue(service, args.folder_id)
     for entry in queue.get("entries", []):
         if entry.get("id") == args.id:
@@ -118,7 +157,7 @@ def cmd_get(args):
 
 
 def cmd_add(args):
-    service = _drive_service(args.key_file)
+    service = _drive_service(args.key_file, args.oauth_file)
     queue, file_id = load_queue(service, args.folder_id)
     used = {e.get("id") for e in queue.get("entries", [])}
     new_id = 1
@@ -139,7 +178,7 @@ def cmd_add(args):
 
 
 def cmd_update(args):
-    service = _drive_service(args.key_file)
+    service = _drive_service(args.key_file, args.oauth_file)
     queue, file_id = load_queue(service, args.folder_id)
     for entry in queue.get("entries", []):
         if entry.get("id") == args.id:
@@ -161,6 +200,7 @@ def cmd_update(args):
 def main():
     parser = argparse.ArgumentParser(description="Drive queue for quiet-ledger")
     parser.add_argument("--key-file", default=None)
+    parser.add_argument("--oauth-file", default=None)
     parser.add_argument("--folder-id", default=os.environ.get("DRIVE_FOLDER_ID"))
     sub = parser.add_subparsers(dest="cmd", required=True)
     p = sub.add_parser("next", help="print the next entry with a status")
