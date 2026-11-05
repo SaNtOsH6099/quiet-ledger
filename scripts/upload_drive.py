@@ -4,13 +4,14 @@
 Drive access is OAuth as the user (DRIVE_OAUTH_JSON in the
 environment, or --oauth-file); a service account cannot create files
 in a personal Drive folder. The destination is DRIVE_FOLDER_ID
-(or --folder-id); empty means the Drive root. Files are named
-"NN - slug.mp4" from the queue id and topic, with the thumbnail as
-"NN - slug-thumb.png", so Drive stays in numeric order and each
-thumbnail sits next to its video. Re-runs update the same-named file
-instead of creating a duplicate. After a successful upload the queue
-entry is marked in-drive with the Drive web link (via queue.py's
-update command logic, imported here).
+(or --folder-id); empty means the Drive root. Each video gets its own
+folder "NN - slug" inside the destination, holding "NN - slug.mp4"
+and "NN - slug-thumb.png", so the root never floods with files and
+each video's files stay together. queue.json stays in the root.
+Re-runs reuse the same folder and update the same-named files instead
+of creating duplicates. After a successful upload the queue entry is
+marked in-drive with the Drive web link (via queue.py's update command
+logic, imported here).
 """
 import argparse
 import json
@@ -28,6 +29,33 @@ def slugify(text):
         cut = slug[:60].rsplit("-", 1)[0]
         slug = cut or slug[:60]
     return slug or "untitled"
+
+
+def find_or_create_folder(service, name, parent_id):
+    """Find a folder by name inside parent_id, or create it."""
+    parent = parent_id or "root"
+    query = (
+        f"name = '{name}' and "
+        "mimeType = 'application/vnd.google-apps.folder' and "
+        f"trashed = false and '{parent}' in parents"
+    )
+    res = (
+        service.files()
+        .list(q=query, fields="files(id)", pageSize=5)
+        .execute()
+    )
+    files = res.get("files", [])
+    if files:
+        return files[0]["id"]
+    meta = {
+        "name": name,
+        "mimeType": "application/vnd.google-apps.folder",
+    }
+    if parent_id:
+        meta["parents"] = [parent_id]
+    done = service.files().create(body=meta, fields="id").execute()
+    print(f"created folder {name}: {done.get('id')}")
+    return done["id"]
 
 
 def drive_service(key_file=None, oauth_file=None):
@@ -94,9 +122,14 @@ def main():
 
     service = drive_service(args.key_file, args.oauth_file)
     base = f"{args.queue_id:03d} - {slugify(args.topic)}"
-    main_file = upload(service, args.file, base + ".mp4", args.folder_id)
+    # Each video gets its own folder inside the Drive folder, so the
+    # root never floods with files. The video and its thumbnail live
+    # in "NN - slug/" and are named "NN - slug.mp4" and
+    # "NN - slug-thumb.png". queue.json stays in the root.
+    video_folder = find_or_create_folder(service, base, args.folder_id)
+    main_file = upload(service, args.file, base + ".mp4", video_folder)
     if args.thumbnail:
-        upload(service, args.thumbnail, base + "-thumb.png", args.folder_id)
+        upload(service, args.thumbnail, base + "-thumb.png", video_folder)
 
     import queue as queue_mod  # noqa: PLC0415
 
