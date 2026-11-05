@@ -22,6 +22,7 @@ import json
 import os
 import re
 import sys
+import time
 import urllib.request
 import urllib.error
 
@@ -218,22 +219,30 @@ def _post_json(url, headers, payload, timeout=120):
         ),
         **headers,
     }
-    req = urllib.request.Request(
-        url,
-        data=json.dumps(payload).encode("utf-8"),
-        headers=merged,
-        method="POST",
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            return json.load(resp)
-    except urllib.error.HTTPError as e:
-        body = e.read().decode("utf-8", "replace")[:500]
-        if e.code in (401, 403, 429):
-            raise KeyFailure(f"HTTP {e.code}: {body}")
-        raise ProviderFailure(f"HTTP {e.code}: {body}")
-    except urllib.error.URLError as e:
-        raise ProviderFailure(f"network error: {e}")
+    data = json.dumps(payload).encode("utf-8")
+    for attempt in range(3):
+        req = urllib.request.Request(
+            url,
+            data=data,
+            headers=merged,
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                return json.load(resp)
+        except urllib.error.HTTPError as e:
+            body = e.read().decode("utf-8", "replace")[:500]
+            if e.code in (401, 403, 429):
+                raise KeyFailure(f"HTTP {e.code}: {body}")
+            if e.code in (500, 502, 503, 504) and attempt < 2:
+                wait = 5 if attempt == 0 else 15
+                print(f"  transient HTTP {e.code}, retrying in {wait}s",
+                      flush=True)
+                time.sleep(wait)
+                continue
+            raise ProviderFailure(f"HTTP {e.code}: {body}")
+        except urllib.error.URLError as e:
+            raise ProviderFailure(f"network error: {e}")
 
 
 def call_groq(key, topic):
@@ -273,30 +282,56 @@ def call_gemini(key, topic):
     return resp["candidates"][0]["content"]["parts"][0]["text"]
 
 
+NVIDIA_MODELS = [
+    "nvidia/nemotron-3-super-120b-a12b",
+    "nvidia/nemotron-3.5-lightning-30b-a3b",
+    "nvidia/nemotron-3-ultra-550b-a55b",
+    "deepseek-ai/deepseek-v4.1-flash",
+    "openai/gpt-oss-20b",
+    "google/gemma-4-31b-it",
+    "meta/llama-3.2-11b-vision-instruct",
+]
+
+
 def call_nvidia(key, topic):
     # NVIDIA NIM hosted endpoint (OpenAI-compatible). Free access is
     # prototyping-only per NVIDIA's own FAQ, so this is a fallback leg,
-    # never the primary brain. Model names are listed on build.nvidia.com;
-    # override with NVIDIA_MODEL if the default is retired.
-    # nemotron-3-super-120b-a12b verified answering on the free key
-    # (Oct 2026 tests); the old llama-3.1-nemotron-70b default returns
-    # 404. Override with NVIDIA_MODEL if it is retired.
-    model = os.environ.get(
-        "NVIDIA_MODEL", "nvidia/nemotron-3-super-120b-a12b"
-    )
-    return _post_json(
-        "https://integrate.api.nvidia.com/v1/chat/completions",
-        {"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
-        {
-            "model": model,
-            "messages": [
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": f"Topic: {topic}"},
-            ],
-            "response_format": {"type": "json_object"},
-            "temperature": 0.7,
-        },
-    )["choices"][0]["message"]["content"]
+    # never the primary brain. Which models a key can use varies by
+    # account, so try several in order; a 404 means that model is not
+    # available to this account. Override the list with NVIDIA_MODELS
+    # (comma-separated) or a single model with NVIDIA_MODEL.
+    models = os.environ.get("NVIDIA_MODELS")
+    if models:
+        candidates = [m.strip() for m in models.split(",") if m.strip()]
+    elif os.environ.get("NVIDIA_MODEL"):
+        candidates = [os.environ["NVIDIA_MODEL"]]
+    else:
+        candidates = NVIDIA_MODELS
+    last_404 = None
+    for model in candidates:
+        try:
+            return _post_json(
+                "https://integrate.api.nvidia.com/v1/chat/completions",
+                {"Authorization": f"Bearer {key}",
+                 "Content-Type": "application/json"},
+                {
+                    "model": model,
+                    "messages": [
+                        {"role": "system", "content": SYSTEM_PROMPT},
+                        {"role": "user", "content": f"Topic: {topic}"},
+                    ],
+                    "response_format": {"type": "json_object"},
+                    "temperature": 0.7,
+                },
+            )["choices"][0]["message"]["content"]
+        except ProviderFailure as e:
+            if "HTTP 404" in str(e):
+                print(f"  nvidia model {model} not available to this "
+                      "account", flush=True)
+                last_404 = e
+                continue
+            raise
+    raise last_404 if last_404 else ProviderFailure("no NVIDIA model answered")
 
 
 def call_local(_key, topic):
@@ -339,6 +374,27 @@ def _keys_for(env_name):
     ]
 
 
+def _parse_json(text):
+    """Parse a brain reply leniently: strip markdown fences, extract the
+    first JSON object if there is surrounding text, and unwrap a
+    double-encoded JSON string."""
+    t = text.strip()
+    if t.startswith("```"):
+        t = re.sub(r"^```(?:json)?\s*", "", t)
+        t = re.sub(r"\s*```$", "", t)
+        t = t.strip()
+    try:
+        obj = json.loads(t)
+    except json.JSONDecodeError:
+        m = re.search(r"\{.*\}", t, re.DOTALL)
+        if not m:
+            raise
+        obj = json.loads(m.group(0))
+    if isinstance(obj, str):
+        obj = json.loads(obj)
+    return obj
+
+
 def draft(topic):
     """Try each provider in turn, each key in turn, until one returns a
     valid draft."""
@@ -370,11 +426,11 @@ def draft(topic):
                 last_error = f"{name}: {e}"
                 break
             try:
-                obj = json.loads(text)
+                obj = _parse_json(text)
             except json.JSONDecodeError as e:
                 print(f"  {label} returned invalid JSON: {e}", flush=True)
                 last_error = f"{label} returned invalid JSON"
-                break
+                continue
             problems = validate_output(obj)
             if problems:
                 print(f"  {label} draft failed validation:", flush=True)
@@ -383,7 +439,7 @@ def draft(topic):
                 last_error = (
                     f"{label} draft failed validation: {problems[0]}"
                 )
-                break
+                continue
             print(f"  {label} produced a valid draft", flush=True)
             return obj, name
     raise RuntimeError(f"all brain providers failed, last error: {last_error}")
