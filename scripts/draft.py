@@ -1,13 +1,16 @@
 #!/usr/bin/env python3
 """Draft the words and the scene plan for one topic.
 
+Two brain calls, each one simple: first the script alone (strict JSON
+{"script": "..."}), then the beats for that script (strict JSON
+{"beats": [...]}). The script is one continuous narration, about 70-90
+words. Each beat covers one or more sentences of the script and carries
+the data one drawn scene needs. Output is validated hard: a bad draft
+fails the run instead of producing a broken file downstream.
+A single call asking for script and beats together failed six test runs
+in a row (short scripts, malformed beats), so the job is split in two.
 Calls the brain providers in order (Groq -> Gemini -> NVIDIA -> local
-small model if one is configured) and asks for strict JSON:
-  {"script": "...", "beats": [...]}
-The script is one continuous narration, about 70-90 words. Each beat covers
-one or more sentences of the script and carries the data one drawn scene
-needs. Output is validated hard: a bad draft fails the run instead of
-producing a broken file downstream.
+small model if one is configured).
 
 Stdlib only. Keys come from the environment, never from files. Each
 provider takes a comma-separated list of keys in one secret, and the
@@ -37,72 +40,90 @@ REQUIRED_DATA = {
     "closing": ("lines", "sub"),
 }
 
-SYSTEM_PROMPT = """You write short narrated explainers. Each one is a single
+SCRIPT_PROMPT = '''You write short narrated explainers. Each one is a single
 continuous narration of 70 to 90 words about one surprising fact, written
 in plain spoken language, one idea per sentence, no em dashes anywhere.
-You also plan the drawn scenes that go with it. Every scene is drawn in
-code (line drawings, charts, stick figures, kinetic text). No photos, no
-generated imagery, nothing that is not drawn.
+Numbers in the script must be true. If you are not sure of a number,
+leave the number out and say the idea in words instead.
 
 Return ONLY a JSON object with this exact shape:
-{
-  "script": "Full narration text. Sentences separated by single spaces.",
+{"script": "Full narration text. Sentences separated by single spaces."}
+
+Rules:
+- The script must be 70 to 90 words. Count the words before you answer.
+  If it is under 70 words, add another sentence.
+- No em dashes. No markdown. No text outside the JSON object.
+'''
+
+
+def beats_prompt(script):
+    """Beat-planning prompt for one finished script."""
+    n = len(split_sentences(script))
+    return f'''You plan the drawn scenes for a narrated explainer. Every scene
+is drawn in code (line drawings, charts, stick figures, kinetic text). No
+photos, no generated imagery, nothing that is not drawn.
+
+Here is the narration script. It has {n} sentences, numbered 0 to {n - 1}:
+{script}
+
+Return ONLY a JSON object with this exact shape:
+{{
   "beats": [
-    {
+    {{
       "type": "kinetic",
       "sentences": [0],
-      "data": {
+      "data": {{
         "eyebrow": "SHORT KICKER IN CAPS",
-        "lines": [{"text": "LINE ONE", "accent": [1]}, {"text": "LINE TWO", "accent": []}]
-      }
-    },
-    {
+        "lines": [{{"text": "LINE ONE", "accent": [1]}}, {{"text": "LINE TWO", "accent": []}}]
+      }}
+    }},
+    {{
       "type": "chart",
       "sentences": [1, 2],
-      "data": {
+      "data": {{
         "title": "CHART TITLE",
         "sub": "what the two lines mean",
         "caption": "one short line under the chart",
         "series": [
-          {"label": "first", "color": "#d9481f", "unit": "deg C",
-           "points": [{"x": "Jan", "y": 5}, {"x": "Feb", "y": 6}]},
-          {"label": "second", "color": "#2b5ea7", "unit": "cm",
-           "points": [{"x": "Jan", "y": 0}, {"x": "Feb", "y": 1}]}
+          {{"label": "first", "color": "#d9481f", "unit": "deg C",
+           "points": [{{"x": "Jan", "y": 5}}, {{"x": "Feb", "y": 6}}]}},
+          {{"label": "second", "color": "#2b5ea7", "unit": "cm",
+           "points": [{{"x": "Jan", "y": 0}}, {{"x": "Feb", "y": 1}}]}}
         ]
-      }
-    },
-    {
+      }}
+    }},
+    {{
       "type": "stickman",
       "sentences": [3],
-      "data": {
+      "data": {{
         "object_label": "330 m",
         "object_height": 330,
         "person_height": 1.8,
         "stretch_label": "+15 cm",
         "note": "(stretch exaggerated)"
-      }
-    },
-    {
+      }}
+    }},
+    {{
       "type": "diagram",
       "sentences": [4],
-      "data": {
+      "data": {{
         "title": "HOW IT WORKS",
         "parts": [
-          {"path": "M100,900 L500,900", "label": "heat in", "x": 300, "y": 860},
-          {"path": "M500,900 L900,600", "label": "metal grows", "x": 700, "y": 700}
+          {{"path": "M100,900 L500,900", "label": "heat in", "x": 300, "y": 860}},
+          {{"path": "M500,900 L900,600", "label": "metal grows", "x": 700, "y": 700}}
         ]
-      }
-    },
-    {
+      }}
+    }},
+    {{
       "type": "closing",
       "sentences": [5],
-      "data": {
-        "lines": [{"text": "NEVER THE SAME", "accent": []}, {"text": "HEIGHT TWICE", "accent": [1]}],
+      "data": {{
+        "lines": [{{"text": "NEVER THE SAME", "accent": []}}, {{"text": "HEIGHT TWICE", "accent": [1]}}],
         "sub": "one quiet closing line"
-      }
-    }
+      }}
+    }}
   ]
-}
+}}
 
 Rules:
 - "sentences" are 0-based indices into the script's sentences. Every
@@ -118,10 +139,8 @@ Rules:
 - Diagram paths are SVG path strings inside a 1080x1920 frame, drawn
   left to right, top to bottom. Keep them simple: straight lines and
   gentle curves only.
-- Numbers in the script must be true. If you are not sure of a number,
-  leave the number out and say the idea in words instead.
 - No em dashes. No markdown. No text outside the JSON object.
-"""
+'''
 
 
 def split_sentences(script):
@@ -130,16 +149,89 @@ def split_sentences(script):
     return [p for p in parts if p]
 
 
-def validate_output(obj):
-    """Check a brain reply against the schema. Returns a list of problems."""
+def validate_script(obj):
+    """Check a script-only reply. Returns a list of problems."""
     problems = []
     if not isinstance(obj, dict):
         return ["top level is not a JSON object"]
     script = obj.get("script")
-    beats = obj.get("beats")
     if not isinstance(script, str) or not script.strip():
         problems.append("missing or empty 'script'")
         return problems
+    if "\u2014" in script or "\u2013" in script:
+        problems.append("script contains a dash character (use plain words)")
+    words = script.split()
+    if not 55 <= len(words) <= 110:
+        problems.append(f"script is {len(words)} words, want 55 to 110")
+    return problems
+
+
+def validate_beats(obj, script):
+    """Check a beats-only reply against one finished script."""
+    problems = []
+    if not isinstance(obj, dict):
+        return ["top level is not a JSON object"]
+    beats = obj.get("beats")
+    if not isinstance(beats, list) or not 3 <= len(beats) <= 7:
+        problems.append("beats must be a list of 3 to 7 items")
+        return problems
+    sentences = split_sentences(script)
+    seen = []
+    for i, beat in enumerate(beats):
+        if not isinstance(beat, dict):
+            problems.append(f"beat {i} is not an object")
+            continue
+        btype = beat.get("type")
+        if btype not in BEAT_TYPES:
+            problems.append(f"beat {i} has unknown type {btype!r}")
+            continue
+        if i == 0 and btype != "kinetic":
+            problems.append("first beat must be type 'kinetic'")
+        if i == len(beats) - 1 and btype != "closing":
+            problems.append("last beat must be type 'closing'")
+        idx = beat.get("sentences")
+        if not isinstance(idx, list) or not idx or not all(
+            isinstance(n, int) and 0 <= n < len(sentences) for n in idx
+        ):
+            problems.append(f"beat {i} has bad sentence indices {idx!r}")
+            continue
+        seen.extend(idx)
+        data = beat.get("data")
+        if not isinstance(data, dict):
+            problems.append(f"beat {i} is missing its data object")
+            continue
+        for field in REQUIRED_DATA[btype]:
+            if field not in data:
+                problems.append(f"beat {i} ({btype}) is missing data.{field}")
+        if btype == "chart":
+            series = data.get("series")
+            if not isinstance(series, list) or len(series) < 1:
+                problems.append(f"beat {i} chart needs at least one series")
+            else:
+                xs = None
+                for s in series:
+                    pts = s.get("points") if isinstance(s, dict) else None
+                    if not isinstance(pts, list) or not 4 <= len(pts) <= 12:
+                        problems.append(f"beat {i} chart series needs 4 to 12 points")
+                        break
+                    labels = [p.get("x") for p in pts]
+                    if xs is None:
+                        xs = labels
+                    elif labels != xs:
+                        problems.append(f"beat {i} chart series do not share x labels")
+    if seen != sorted(seen) or sorted(seen) != list(range(len(sentences))):
+        problems.append(
+            f"beats must cover sentences 0..{len(sentences) - 1} exactly once, got {seen}"
+        )
+    return problems
+
+
+def validate_output(obj):
+    """Check a combined draft against the schema. Returns a list of problems."""
+    problems = validate_script(obj)
+    if problems:
+        return problems
+    return validate_beats(obj, obj["script"])
     if "\u2014" in script or "\u2013" in script:
         problems.append("script contains a dash character (use plain words)")
     words = script.split()
@@ -261,15 +353,15 @@ def _post_json(url, headers, payload, timeout=120):
     raise ProviderFailure("request failed after retries")
 
 
-def call_groq(key, topic):
+def call_groq(key, system, user):
     return _post_json(
         "https://api.groq.com/openai/v1/chat/completions",
         {"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
         {
             "model": "openai/gpt-oss-120b",
             "messages": [
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": f"Topic: {topic}"},
+                {"role": "system", "content": system},
+                {"role": "user", "content": user},
             ],
             "reasoning_effort": "low",
             "response_format": {"type": "json_object"},
@@ -279,7 +371,7 @@ def call_groq(key, topic):
     )["choices"][0]["message"]["content"]
 
 
-def call_gemini(key, topic):
+def call_gemini(key, system, user):
     # gemini-2.5-flash was retired for new users; Google's own error
     # message points at gemini-3.8-flash. Override with GEMINI_MODEL.
     model = os.environ.get("GEMINI_MODEL", "gemini-3.8-flash")
@@ -288,8 +380,8 @@ def call_gemini(key, topic):
         f"{model}:generateContent?key=" + key,
         {"Content-Type": "application/json"},
         {
-            "system_instruction": {"parts": [{"text": SYSTEM_PROMPT}]},
-            "contents": [{"parts": [{"text": f"Topic: {topic}"}]}],
+            "system_instruction": {"parts": [{"text": system}]},
+            "contents": [{"parts": [{"text": user}]}],
             "generationConfig": {
                 "responseMimeType": "application/json",
                 "temperature": 0.7,
@@ -308,7 +400,7 @@ NVIDIA_MODELS = [
 ]
 
 
-def call_nvidia(key, topic):
+def call_nvidia(key, system, user):
     # NVIDIA NIM hosted endpoint (OpenAI-compatible). Free access is
     # prototyping-only per NVIDIA's own FAQ, so this is a fallback leg,
     # never the primary brain. Which models a key can use varies by
@@ -334,8 +426,8 @@ def call_nvidia(key, topic):
                 {
                     "model": model,
                     "messages": [
-                        {"role": "system", "content": SYSTEM_PROMPT},
-                        {"role": "user", "content": f"Topic: {topic}"},
+                        {"role": "system", "content": system},
+                        {"role": "user", "content": user},
                     ],
                     "response_format": {"type": "json_object"},
                     "temperature": 0.7,
@@ -358,7 +450,7 @@ def call_nvidia(key, topic):
     raise last_error if last_error else ProviderFailure("no NVIDIA model answered")
 
 
-def call_local(_key, topic):
+def call_local(_key, system, user):
     """Lifeboat leg: a small local model, only if one is configured."""
     path = os.environ.get("LLAMA_MODEL_PATH")
     if not path:
@@ -368,8 +460,8 @@ def call_local(_key, topic):
     llm = Llama(model_path=path, n_ctx=4096, verbose=False)
     out = llm.create_chat_completion(
         messages=[
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": f"Topic: {topic}"},
+            {"role": "system", "content": system},
+            {"role": "user", "content": user},
         ],
         response_format={"type": "json_object"},
         temperature=0.7,
@@ -425,11 +517,12 @@ def _parse_json(text):
     return obj
 
 
-def draft(topic):
-    """Try each provider in turn, each key in turn, until one returns a
-    valid draft. A key that returns bad JSON gets a second chance on a
-    later pass, because the failure is the model's output, not the key.
-    A key that fails auth or rate limits is not retried."""
+def generate(system, user, validate, label):
+    """One brain call: try each provider in turn, each key in turn, until
+    one returns a reply that passes validate. A key that returns bad
+    JSON gets a second chance on a later pass, because the failure is
+    the model's output, not the key. A key that fails auth or rate
+    limits is not retried. Returns (parsed object, provider name)."""
     last_error = "no providers configured"
     for name, env_name, fn in PROVIDERS:
         keys = _keys_for(env_name)
@@ -442,23 +535,25 @@ def draft(topic):
             for ki, key in enumerate(keys):
                 if ki in dead_keys:
                     continue
-                label = (
+                attempt = (
                     f"{name} key {ki + 1}/{len(keys)}"
                     if len(keys) > 1
                     else name
                 )
                 if pass_no:
-                    label += f" (retry {pass_no + 1})"
-                print(f"trying brain: {label}", flush=True)
+                    attempt += f" (retry {pass_no + 1})"
+                print(f"trying brain for {label}: {attempt}", flush=True)
                 try:
-                    text = fn(key, topic)
+                    text = fn(key, system, user)
                 except RetryableFailure as e:
-                    print(f"  {label} failed ({e}), trying next key", flush=True)
-                    last_error = f"{label}: {e}"
+                    print(f"  {attempt} failed ({e}), trying next key",
+                          flush=True)
+                    last_error = f"{attempt}: {e}"
                     continue
                 except KeyFailure as e:
-                    print(f"  {label} failed ({e}), trying next key", flush=True)
-                    last_error = f"{label}: {e}"
+                    print(f"  {attempt} failed ({e}), trying next key",
+                          flush=True)
+                    last_error = f"{attempt}: {e}"
                     dead_keys.add(ki)
                     continue
                 except ProviderFailure as e:
@@ -474,27 +569,58 @@ def draft(topic):
                 try:
                     obj = _parse_json(text)
                 except json.JSONDecodeError as e:
-                    print(f"  {label} returned invalid JSON: {e}", flush=True)
+                    print(f"  {attempt} returned invalid JSON: {e}", flush=True)
                     print(f"  raw reply (first 400 chars): {text[:400]!r}",
                           flush=True)
-                    last_error = f"{label} returned invalid JSON"
+                    last_error = f"{attempt} returned invalid JSON"
                     continue
-                problems = validate_output(obj)
+                problems = validate(obj)
                 if problems:
-                    print(f"  {label} draft failed validation:", flush=True)
+                    print(f"  {attempt} {label} failed validation:", flush=True)
                     for p in problems:
                         print(f"    - {p}", flush=True)
                     print(f"  raw reply (first 400 chars): {text[:400]!r}",
                           flush=True)
                     last_error = (
-                        f"{label} draft failed validation: {problems[0]}"
+                        f"{attempt} {label} failed validation: {problems[0]}"
                     )
                     continue
-                print(f"  {label} produced a valid draft", flush=True)
+                print(f"  {attempt} produced a valid {label}", flush=True)
                 return obj, name
             if provider_down:
                 break
-    raise RuntimeError(f"all brain providers failed, last error: {last_error}")
+    raise RuntimeError(
+        f"all brain providers failed on {label}, last error: {last_error}"
+    )
+
+
+def draft(topic):
+    """Two calls, each one simple enough for the model to get right.
+    First the script alone (70 to 90 words of narration), then the
+    beats for that script. A single call asking for both at once failed
+    six test runs in a row: the model wrote short scripts and malformed
+    beats. Splitting the job fixes both."""
+    script_obj, script_provider = generate(
+        SCRIPT_PROMPT,
+        f"Topic: {topic}",
+        validate_script,
+        "script",
+    )
+    script = script_obj["script"]
+    beats_obj, beats_provider = generate(
+        beats_prompt(script),
+        "Plan the beats for the script above.",
+        lambda obj: validate_beats(obj, script),
+        "beats",
+    )
+    obj = {"script": script, "beats": beats_obj["beats"]}
+    problems = validate_output(obj)
+    if problems:
+        raise RuntimeError(f"combined draft failed validation: {problems}")
+    print(f"draft ready (script via {script_provider}, "
+          f"beats via {beats_provider})", flush=True)
+    return obj, f"{script_provider}+{beats_provider}"
+
 
 
 def main():
