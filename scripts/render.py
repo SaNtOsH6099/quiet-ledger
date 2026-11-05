@@ -30,7 +30,10 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 W, H = 1080, 1920
-PLOT = {"x0": 110, "x1": 970, "y_top": 450, "y_bottom": 1250}
+# Plot area. x0 leaves 140px on the left so the widest y-axis label
+# (e.g. "13.2 °C", ~93px) fits without overflowing the canvas edge;
+# the labels sit right-aligned ending at x=140.
+PLOT = {"x0": 150, "x1": 970, "y_top": 450, "y_bottom": 1250}
 
 
 def split_sentences(script):
@@ -123,7 +126,7 @@ def build_chart_svg(beat_id, data):
         grid += (f'<line x1="{PLOT["x0"]}" y1="{y:.0f}" '
                  f'x2="{PLOT["x1"]}" y2="{y:.0f}" />\n')
         lab = f"{v:g}"
-        labels_l += (f'<text x="70" y="{y + 8:.0f}" text-anchor="end">'
+        labels_l += (f'<text x="140" y="{y + 8:.0f}" text-anchor="end">'
                      f"{lab}{suffix_for(series[0].get('unit', ''))}</text>\n")
     parts.append(f'<g stroke="#d8d0bf" stroke-width="2">\n{grid}</g>')
     parts.append(f'<g class="axis-label">\n{labels_l}</g>')
@@ -165,9 +168,13 @@ def build_chart_svg(beat_id, data):
         unit = s.get("unit", "")
         val = s["points"][peak_i]["y"]
         lab = f"{val:g}{suffix_for(unit)}"
+        # stagger peak labels vertically per series: when two series peak
+        # at the same point (both clamped to y=480, x=860) the labels
+        # would otherwise sit exactly on top of each other.
+        peak_y = max(py - 18, 480) + si * 60
         parts.append(
             f'<text id="{beat_id}-peak-{si}" class="peak-label" '
-            f'x="{min(px + 12, 860):.0f}" y="{max(py - 18, 480):.0f}" '
+            f'x="{min(px + 12, 860):.0f}" y="{peak_y:.0f}" '
             f'fill="{s["color"]}" opacity="0">{lab}</text>'
         )
     return "\n".join(parts)
