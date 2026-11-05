@@ -56,6 +56,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      - name: reject stdlib-shadowing filenames
+        run: python3 scripts/check_no_shadow.py
       - name: install Drive tools
         run: python3 -m pip install -q -r requirements-drive.txt
       - name: resolve the topic
@@ -120,6 +122,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      - name: reject stdlib-shadowing filenames
+        run: python3 scripts/check_no_shadow.py
       - name: install Drive tools
         run: python3 -m pip install -q -r requirements-drive.txt
       - name: install speech tools
