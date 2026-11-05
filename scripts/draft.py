@@ -207,10 +207,21 @@ class ProviderFailure(Exception):
 
 
 def _post_json(url, headers, payload, timeout=120):
+    # Groq's API sits behind Cloudflare, whose edge blocks the default
+    # Python user agent (HTTP 403, error code 1010). A browser user
+    # agent passes the check; the call itself is a normal authenticated
+    # API request with a valid key.
+    merged = {
+        "User-Agent": (
+            "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+            "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+        ),
+        **headers,
+    }
     req = urllib.request.Request(
         url,
         data=json.dumps(payload).encode("utf-8"),
-        headers=headers,
+        headers=merged,
         method="POST",
     )
     try:
@@ -243,9 +254,12 @@ def call_groq(key, topic):
 
 
 def call_gemini(key, topic):
+    # gemini-2.5-flash was retired for new users; Google's own error
+    # message points at gemini-3.8-flash. Override with GEMINI_MODEL.
+    model = os.environ.get("GEMINI_MODEL", "gemini-3.8-flash")
     resp = _post_json(
         "https://generativelanguage.googleapis.com/v1beta/models/"
-        "gemini-2.5-flash:generateContent?key=" + key,
+        f"{model}:generateContent?key=" + key,
         {"Content-Type": "application/json"},
         {
             "system_instruction": {"parts": [{"text": SYSTEM_PROMPT}]},
@@ -264,8 +278,11 @@ def call_nvidia(key, topic):
     # prototyping-only per NVIDIA's own FAQ, so this is a fallback leg,
     # never the primary brain. Model names are listed on build.nvidia.com;
     # override with NVIDIA_MODEL if the default is retired.
+    # nemotron-3-super-120b-a12b verified answering on the free key
+    # (Oct 2026 tests); the old llama-3.1-nemotron-70b default returns
+    # 404. Override with NVIDIA_MODEL if it is retired.
     model = os.environ.get(
-        "NVIDIA_MODEL", "nvidia/llama-3.1-nemotron-70b-instruct"
+        "NVIDIA_MODEL", "nvidia/nemotron-3-super-120b-a12b"
     )
     return _post_json(
         "https://integrate.api.nvidia.com/v1/chat/completions",
