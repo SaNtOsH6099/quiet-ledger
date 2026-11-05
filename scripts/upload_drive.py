@@ -10,7 +10,7 @@ and "NN - slug-thumb.png", so the root never floods with files and
 each video's files stay together. queue.json stays in the root.
 Re-runs reuse the same folder and update the same-named files instead
 of creating duplicates. After a successful upload the queue entry is
-marked in-drive with the Drive web link (via queue.py's update command
+marked in-drive with the Drive web link (via drive_queue.py's update command
 logic, imported here).
 """
 import argparse
@@ -61,7 +61,7 @@ def find_or_create_folder(service, name, parent_id):
 def drive_service(key_file=None, oauth_file=None):
     from googleapiclient.discovery import build  # noqa: PLC0415
 
-    import queue as queue_mod  # noqa: PLC0415
+    import drive_queue as queue_mod  # noqa: PLC0415
 
     return build(
         "drive", "v3",
@@ -131,7 +131,7 @@ def main():
     if args.thumbnail:
         upload(service, args.thumbnail, base + "-thumb.png", video_folder)
 
-    import queue as queue_mod  # noqa: PLC0415
+    import drive_queue as queue_mod  # noqa: PLC0415
 
     q, file_id = queue_mod.load_queue(service, args.folder_id)
     found = False

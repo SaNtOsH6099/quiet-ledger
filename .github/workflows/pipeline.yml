@@ -71,7 +71,7 @@ jobs:
           topic = os.environ.get("TOPIC_INPUT", "").strip()
           entry_id = ""
           if not topic:
-              r = subprocess.run([sys.executable, "scripts/queue.py", "next", "--status", "idea"],
+              r = subprocess.run([sys.executable, "scripts/drive_queue.py", "next", "--status", "idea"],
                                  capture_output=True, text=True)
               if r.returncode != 0:
                   print("no topic given and no 'idea' entry in the queue", file=sys.stderr)
@@ -105,9 +105,9 @@ jobs:
           if [ -n "${{ steps.topic.outputs.entry_id }}" ]; then
             ID="${{ steps.topic.outputs.entry_id }}"
           else
-            ID=$(python3 scripts/queue.py add --topic "${{ steps.topic.outputs.topic }}" | python3 -c "import json,sys; print(json.load(sys.stdin)['id'])")
+            ID=$(python3 scripts/drive_queue.py add --topic "${{ steps.topic.outputs.topic }}" | python3 -c "import json,sys; print(json.load(sys.stdin)['id'])")
           fi
-          python3 scripts/queue.py update --id "$ID" --status script-ready --script-file out/script.json
+          python3 scripts/drive_queue.py update --id "$ID" --status script-ready --script-file out/script.json
           echo "queue_id=$ID" >> "$GITHUB_OUTPUT"
 
   voice:
@@ -137,7 +137,7 @@ jobs:
           python3 - <<'PY'
           import json, os, subprocess, sys
           qid = os.environ.get("QUEUE_ID_INPUT", "").strip()
-          cmd = [sys.executable, "scripts/queue.py"]
+          cmd = [sys.executable, "scripts/drive_queue.py"]
           cmd += ["get", "--id", qid] if qid else ["next", "--status", "approved"]
           r = subprocess.run(cmd, capture_output=True, text=True)
           if r.returncode != 0:
@@ -167,7 +167,7 @@ jobs:
           DRIVE_FOLDER_ID: ${{ secrets.DRIVE_FOLDER_ID }}
         run: |
           ID=$(python3 -c "import json; print(json.load(open('out/meta.json'))['queue_id'])")
-          python3 scripts/queue.py update --id "$ID" --status rendering
+          python3 scripts/drive_queue.py update --id "$ID" --status rendering
       - name: narrate
         run: python3 scripts/voice.py --script out/script.json --out out/narration.wav
       - uses: actions/upload-artifact@v4
