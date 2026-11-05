@@ -416,8 +416,12 @@ def _parse_json(text):
         obj = json.loads(m.group(0))
     if isinstance(obj, str):
         obj = json.loads(obj)
-    if isinstance(obj, list) and len(obj) == 1 and isinstance(obj[0], dict):
-        obj = obj[0]
+    if isinstance(obj, list):
+        # The model sometimes wraps the draft in an array; take the
+        # first object in it.
+        for item in obj:
+            if isinstance(item, dict):
+                return item
     return obj
 
 
