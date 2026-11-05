@@ -56,6 +56,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      - name: install Drive tools
+        run: python3 -m pip install -q -r requirements-drive.txt
       - name: resolve the topic
         id: topic
         env:
@@ -116,6 +118,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      - name: install Drive tools
+        run: python3 -m pip install -q -r requirements-drive.txt
       - name: install speech tools
         run: |
           sudo apt-get update -qq && sudo apt-get install -y -qq espeak-ng
