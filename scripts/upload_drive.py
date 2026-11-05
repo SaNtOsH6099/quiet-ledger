@@ -1,12 +1,16 @@
 #!/usr/bin/env python3
 """Send the finished file and its thumbnail to Google Drive.
 
-The service account key comes from DRIVE_SERVICE_ACCOUNT_JSON (JSON text
-in the environment) or --key-file. The destination is DRIVE_FOLDER_ID
+Drive access is OAuth as the user (DRIVE_OAUTH_JSON in the
+environment, or --oauth-file); a service account cannot create files
+in a personal Drive folder. The destination is DRIVE_FOLDER_ID
 (or --folder-id); empty means the Drive root. Files are named
-"NN - slug.mp4" from the queue id and topic, so Drive stays in order.
-After a successful upload the queue entry is marked in-drive with the
-Drive web link (via queue.py's update command logic, imported here).
+"NN - slug.mp4" from the queue id and topic, with the thumbnail as
+"NN - slug-thumb.png", so Drive stays in numeric order and each
+thumbnail sits next to its video. Re-runs update the same-named file
+instead of creating a duplicate. After a successful upload the queue
+entry is marked in-drive with the Drive web link (via queue.py's
+update command logic, imported here).
 """
 import argparse
 import json
@@ -19,7 +23,11 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 def slugify(text):
     slug = re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-")
-    return slug[:60] or "untitled"
+    if len(slug) > 60:
+        # Cut at a word boundary so a long topic never ends mid-word.
+        cut = slug[:60].rsplit("-", 1)[0]
+        slug = cut or slug[:60]
+    return slug or "untitled"
 
 
 def drive_service(key_file=None, oauth_file=None):
