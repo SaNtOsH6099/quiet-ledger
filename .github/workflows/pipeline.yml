@@ -346,6 +346,38 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+  qc:
+    name: frame QC on the finished video
+    needs: assemble
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: install QC tools
+        timeout-minutes: 10
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg
+          python3 -m pip install -q -r requirements/qc.txt
+      - uses: actions/download-artifact@v4
+        with:
+          name: final
+          path: out/
+      - uses: actions/download-artifact@v4
+        with:
+          name: scenes
+          path: out/
+      - name: check the rendered frames
+        run: python3 -m pipeline.qc.frame_qc --video out/final.mp4 --script out/script.json --timings out/timings.json --out out/qc-report.json --work-dir work/qc
+      - uses: actions/upload-artifact@v4
+        with:
+          name: qc
+          path: out/
+          if-no-files-found: error
+          retention-days: 7
+
   thumbnail:
     name: draw the thumbnail
     needs: scenes
@@ -373,7 +405,7 @@ jobs:
 
   upload-drive:
     name: file it in Drive
-    needs: [assemble, thumbnail]
+    needs: [qc, thumbnail]
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
@@ -401,6 +433,10 @@ jobs:
           path: out/
       - uses: actions/download-artifact@v4
         with:
+          name: qc
+          path: out/
+      - uses: actions/download-artifact@v4
+        with:
           name: thumbnail
           path: out/
       - name: upload and mark in-drive
@@ -414,11 +450,11 @@ jobs:
           # File everything into the video's own environment folder, so
           # the folder is the whole video and can be re-assembled from
           # it alone.
-          python3 -m pipeline.drive.upload_drive --file out/final.mp4 --thumbnail out/thumbnail.png --script out/script.json --narration out/narration.wav --words out/words.json --captions out/captions.ass --silent out/silent.mp4 --queue-id "$ID" --topic "$TOPIC"
+          python3 -m pipeline.drive.upload_drive --file out/final.mp4 --thumbnail out/thumbnail.png --script out/script.json --narration out/narration.wav --words out/words.json --captions out/captions.ass --silent out/silent.mp4 --qc-report out/qc-report.json --queue-id "$ID" --topic "$TOPIC"
 
   repair:
     name: repair the code with the brain
-    needs: [voice, scenes, captions, assemble, thumbnail, upload-drive]
+    needs: [voice, scenes, captions, assemble, qc, thumbnail, upload-drive]
     if: failure()
     runs-on: ubuntu-latest
     timeout-minutes: 60

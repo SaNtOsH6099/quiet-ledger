@@ -38,6 +38,8 @@ def main():
                         help="captions.ass to file alongside the video")
     parser.add_argument("--silent", default=None,
                         help="silent.mp4 to file alongside the video")
+    parser.add_argument("--qc-report", default=None,
+                        help="qc-report.json to file alongside the video")
     parser.add_argument("--queue-id", type=int, required=True)
     parser.add_argument("--topic", required=True)
     parser.add_argument("--key-file", default=None)
@@ -78,6 +80,9 @@ def main():
     if args.silent:
         env_mod.upload_file(service, video_folder, args.silent,
                             "silent.mp4")
+    if args.qc_report:
+        env_mod.upload_file(service, video_folder, args.qc_report,
+                            "qc-report.json")
 
     # Update the video's meta.json with the finished state.
     meta = env_mod.load_meta(service, video_folder) or {}

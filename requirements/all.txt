@@ -1,5 +1,5 @@
 # Everything, for local runs. The jobs install only the slice they need
-# (see drive.txt, scenes.txt, voice.txt, thumbnail.txt) to keep each
+# (see drive.txt, scenes.txt, voice.txt, thumbnail.txt, qc.txt) to keep each
 # job light.
 -r base.txt
 kokoro==0.9.4
@@ -8,3 +8,5 @@ av==18.1.0
 soundfile==0.14.0
 google-api-python-client==2.181.0
 google-auth==2.41.1
+rapidocr-onnxruntime
+opencv-python-headless

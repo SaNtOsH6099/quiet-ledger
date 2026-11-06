@@ -201,6 +201,12 @@ SCENE_CODE_MARKERS = (
     "caption_exit_missing_hard_kill",
     "Layout",
     "missing_hard_kill",
+    # frame_qc failures are scene-code defects: clipped or missing
+    # text in the rendered frames means the brain-written code is
+    # wrong, not a repo file.
+    "frame_qc",
+    "text clipped",
+    "NO scene text is visible",
 )
 
 

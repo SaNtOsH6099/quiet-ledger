@@ -43,8 +43,9 @@ its own folder automatically the first time it is rendered.
 | 5 | Scenes | `pipeline.render.render` | `script.json` + `narration.wav` | `silent.mp4` + `timings.json` + `words.json` |
 | 6 | Captions | `pipeline.render.captions` | `words.json` + `script.json` | `captions.ass` |
 | 7 | Assemble | `pipeline.render.assemble` | `silent.mp4` + `narration.wav` + `captions.ass` | `final.mp4` |
-| 8 | Thumbnail | `pipeline.render.thumbnail` | `script.json` | `thumbnail.png` |
-| 9 | Upload | `pipeline.drive.upload_drive` | `final.mp4` + `thumbnail.png` + build files | video's folder + queue entry marked `in-drive` |
+| 8 | Frame QC | `pipeline.qc.frame_qc` | `final.mp4` + `script.json` + `timings.json` | `qc-report.json`; fails the render on clipped or missing text |
+| 9 | Thumbnail | `pipeline.render.thumbnail` | `script.json` | `thumbnail.png` |
+| 10 | Upload | `pipeline.drive.upload_drive` | `final.mp4` + `thumbnail.png` + build files | video's folder + queue entry marked `in-drive` |
 
 ## Scene-code freshness: the codegen version
 
@@ -63,6 +64,27 @@ refuses to render stale code (exit 3 = regenerate). This is what stops
 a re-render from silently replaying old broken code: entry 3's clipped
 hook and missing closing text shipped twice because the render trusted
 the stored code blindly, and the new checks never ran on it.
+
+## Frame QC: check the actual rendered video
+
+`pipeline.qc.frame_qc` runs on the finished video, after assembly and
+before upload. The static checks (CSS, validator) run on the code;
+this runs on the real frames, so it catches what they cannot see.
+
+- Tier 1 (ffmpeg, zero new deps): blackdetect / freezedetect /
+  signalstats in one decode pass — blank frames, frozen segments,
+  near-empty frames.
+- Tier 2 (RapidOCR): one frame per beat at the hold point (70%
+  through the beat, after the text has drawn in). An OCR box touching
+  the left or right frame edge is clipped text; a beat whose markup
+  has a big-text element but whose frame shows no scene text in the
+  scene-text zone (above the caption zone) is missing text. Verified
+  2026-11-06 on entry 3's defective render: it catches all three
+  defects (hook clipped, "Engineers designe" clipped, closing text
+  missing) with no false positives on the clean chart beat.
+- A QC failure is a scene-code defect: the repair job recognises the
+  "frame_qc:" error lines and regenerates the code instead of patching
+  a repo file. The qc-report.json is filed into the video's folder.
 
 ## The brain
 
