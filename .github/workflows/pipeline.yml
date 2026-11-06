@@ -32,6 +32,12 @@ on:
         default: draft
         type: choice
         options: [draft, render]
+      format:
+        description: "Video format: shorts (1080x1920) or longform (1920x1080)"
+        required: false
+        default: shorts
+        type: choice
+        options: [shorts, longform]
   schedule:
     - cron: "30 3 * * *" # 09:00 IST daily, render mode
 
@@ -91,7 +97,7 @@ jobs:
           GROQ_API_KEYS: ${{ secrets.GROQ_API_KEYS }}
           GEMINI_API_KEYS: ${{ secrets.GEMINI_API_KEYS }}
           NVIDIA_API_KEYS: ${{ secrets.NVIDIA_API_KEYS }}
-        run: python3 scripts/draft.py "${{ steps.topic.outputs.topic }}" out
+        run: python3 scripts/draft.py "${{ steps.topic.outputs.topic }}" out --format=${{ inputs.format }}
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
@@ -100,7 +106,7 @@ jobs:
           GROQ_API_KEYS: ${{ secrets.GROQ_API_KEYS }}
           GEMINI_API_KEYS: ${{ secrets.GEMINI_API_KEYS }}
           NVIDIA_API_KEYS: ${{ secrets.NVIDIA_API_KEYS }}
-        run: python3 scripts/codegen.py out/script.json out
+        run: python3 scripts/codegen.py out/script.json out --format=${{ inputs.format }}
       - uses: actions/upload-artifact@v4
         with:
           name: draft

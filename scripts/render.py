@@ -36,6 +36,8 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+import guardrails  # noqa: E402 - format canvas + base template
+
 W, H = 1080, 1920
 
 
@@ -100,7 +102,9 @@ def build_index(templates_dir, scenes, bounds, total):
         raise RuntimeError(
             f"code has {len(scenes['code'])} beats but the plan has "
             f"{len(scenes['beats'])}; re-run codegen.py")
-    base = open(os.path.join(templates_dir, "base.html")).read()
+    fmt = scenes.get("format", "shorts")
+    base_name = guardrails.get(fmt)["base_template"]
+    base = open(os.path.join(templates_dir, base_name)).read()
     beats_html, timeline_js = [], []
     for i, (beat, code, (start, end)) in enumerate(
             zip(scenes["beats"], scenes["code"], bounds)):

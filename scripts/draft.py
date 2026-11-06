@@ -506,14 +506,20 @@ def draft(topic):
 
 def main():
     if len(sys.argv) < 3:
-        print("usage: draft.py TOPIC OUT_DIR", file=sys.stderr)
+        print("usage: draft.py TOPIC OUT_DIR [--format shorts|longform]",
+              file=sys.stderr)
         return 2
     topic, out_dir = sys.argv[1], sys.argv[2]
+    fmt = "shorts"
+    for a in sys.argv[3:]:
+        if a.startswith("--format="):
+            fmt = a.split("=", 1)[1]
     os.makedirs(out_dir, exist_ok=True)
     obj, provider = draft(topic)
     obj["topic"] = topic
     obj["provider"] = provider
     obj["words"] = len(obj["script"].split())
+    obj["format"] = fmt
     with open(os.path.join(out_dir, "script.json"), "w") as f:
         json.dump(obj, f, indent=2)
     # human-readable copy, for review and approval

@@ -33,6 +33,26 @@ error, fixes the broken code (a repo file, or the scene code for the
 failing beat), and retries the render. After three consecutive repairs
 it stops and waits for a human.
 
+## Guardrails
+
+Basic rules so the video does not produce unnecessary bugs. They are
+different for Shorts and long-form, because the formats are different
+mediums. The rules live in `guardrails.json` (data, not code), so the
+control app can read and change them later without a code push. The
+code writer puts the format's rules in the prompt and enforces them in
+validation; a beat that breaks a rule is rejected and retried, never
+shipped. Pick the format when you trigger a draft (shorts is the
+default).
+
+- Shorts: vertical 1080x1920, 30 to 60 seconds, fast pace, hook in the
+  first seconds. Big text lines hold at most 4 words (24 characters).
+- Long-form: horizontal 1920x1080, 10 to 15 minutes, chapters, slow
+  pace with breathing room. Big text lines hold at most 6 words
+  (40 characters).
+- Both: core GSAP only, no plugins; prepDraw/dashLen only on paths,
+  never on text; no duration arithmetic from S/E; hard kill appended
+  mechanically; everything inside the canvas margins.
+
 Steps 2 to 9 run on GitHub's machines, not yours. Your machine never
 renders anything.
 

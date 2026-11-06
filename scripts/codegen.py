@@ -42,33 +42,43 @@ import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from draft import generate, split_sentences  # noqa: E402
+import guardrails  # noqa: E402
 
-DESIGN_SYSTEM = '''You write the drawn scene for one beat of a narrated
-explainer. Every scene is drawn in code (line drawings, charts, stick
-figures, kinetic text, diagrams). No photos, no generated imagery.
-Invent the visual approach that best serves THIS scene.
 
-CANVAS AND LOOK:
-- 1080 wide x 1920 tall, vertical. All coordinates are in this space.
-- Background is warm paper #f6f1e7 (already in the page; do not set one).
-- Ink #1c1c1c, red accent #d9481f, blue #2b5ea7, grey text #8a8378.
-- Font Geist, weights 500/600/700/800. Shared classes (use them, do
-  not redefine): .eyebrow (34px caps kicker, grey), .hook-line (116px
-  weight 800, centred; wrap each word in <span class="w">word</span>,
-  red words get <span class="w red">), .chart-title (40px, 800),
-  .chart-sub (30px, grey), .caption-line (34px, muted, italic),
-  .diagram-title (44px, 800), .close-line (104px, 800; same .w spans),
-  .close-sub (38px, grey). SVG text: .axis-label, .month-label,
-  .peak-label (44px, 800), .scale-label, .note, .part-label.
-- BIG TEXT RULE: .hook-line and .close-line do NOT wrap. One line
-  holds at most 3 short words (about 20 characters). A full sentence
-  on one line overflows the frame and is cut off. Break long text
-  into MULTIPLE short lines, one .hook-line or .close-line div per
-  phrase, stacked vertically. Never put a whole sentence on one big
-  text line.
-- Inline styles are fine for anything these do not cover. Body text
-  28-34px, titles 40-44px, big words 100-116px.
+def design_system(fmt):
+    """The code-writing prompt: the shared design language plus the
+    format's guardrails (Shorts vs long-form)."""
+    g = guardrails.get(fmt)
+    w, h = g["canvas"]
+    orient = "vertical" if h > w else "horizontal"
+    header = (
+        "You write the drawn scene for one beat of a narrated\n"
+        "explainer. Every scene is drawn in code (line drawings, charts, stick\n"
+        "figures, kinetic text, diagrams). No photos, no generated imagery.\n"
+        "Invent the visual approach that best serves THIS scene.\n"
+        "\n"
+        + g["prompt"]
+        + "\nCANVAS AND LOOK:\n"
+        f"- {w} wide x {h} tall, {orient}. All coordinates are in this space.\n"
+        "- Background is warm paper #f6f1e7 (already in the page; do not set one).\n"
+        "- Ink #1c1c1c, red accent #d9481f, blue #2b5ea7, grey text #8a8378.\n"
+        "- Font Geist, weights 500/600/700/800. Shared classes (use them, do\n"
+        "  not redefine): .eyebrow (caps kicker, grey), .hook-line (weight 800,\n"
+        '  centred; wrap each word in <span class="w">word</span>, red words\n'
+        '  get <span class="w red">), .chart-title (weight 800), .chart-sub\n'
+        "  (grey), .caption-line (muted, italic), .diagram-title (weight 800),\n"
+        "  .close-line (weight 800; same .w spans), .close-sub (grey). SVG\n"
+        "  text: .axis-label, .month-label, .peak-label (weight 800),\n"
+        "  .scale-label, .note, .part-label.\n"
+        "- Inline styles are fine for anything these do not cover. Keep font\n"
+        "  sizes in the format's range (see above).\n"
+    )
+    return header + STRUCTURE_AND_EXAMPLE
 
+
+# Shared structure + one compact example. Plain string, not an f-string:
+# the GSAP code is full of braces, which would break an f-string.
+STRUCTURE_AND_EXAMPLE = """
 STRUCTURE:
 - Markup is ONE div:
   <div id="%%ID%%" class="beat clip" data-start="%%START%%"
@@ -78,8 +88,10 @@ STRUCTURE:
 - Inside, use HTML divs and/or one SVG
   (<svg width="1080" height="1920"
    style="position:absolute;inset:0;overflow:visible;">).
-- Keep everything inside the canvas: left margin 40px, right edge
-  1040px, top 120px, bottom 1800px. No overflow, no overlap.
+  Use the canvas width and height from above for the SVG, not 1080x1920
+  unless the format is Shorts.
+- Keep everything inside the canvas margins (see the format rules).
+  No overflow, no overlap.
 - Timeline is GSAP JS. S is the beat start, E the beat end, tl the
   timeline. Helpers: prepDraw(path) readies an SVG path for draw-on
   (returns its length); dashLen(selector) returns a path length.
@@ -117,14 +129,14 @@ document.querySelectorAll("#%%ID%% .hook-line").forEach(function (line, li) {
 });
 var swooshLen = prepDraw(document.getElementById("%%ID%%-swoosh"));
 tl.fromTo("#%%ID%%-swoosh", { strokeDashoffset: swooshLen, opacity: 0 }, { strokeDashoffset: 0, opacity: 1, duration: 0.5, ease: "power2.inOut" }, S + 1.9);
-'''
+"""
 
 # The exit every beat gets, appended mechanically (see module docstring).
 EXIT_FADE = 'tl.to("#%%ID%%", { opacity: 0, duration: 0.4 }, E - 0.4);'
 HARD_KILL = 'tl.set("#%%ID%%", { opacity: 0 }, E);'
 
 
-def code_prompt(script, beat, beat_no, n_beats, est_seconds):
+def code_prompt(script, beat, beat_no, n_beats, est_seconds, fmt):
     """One beat's code-writing prompt."""
     sentences = split_sentences(script)
     spoken = " ".join(sentences[n] for n in beat["sentences"])
@@ -133,7 +145,7 @@ def code_prompt(script, beat, beat_no, n_beats, est_seconds):
         role = "This is the FIRST beat: the hook. It must stop a scroller. Big, bold, immediate."
     elif beat_no == n_beats:
         role = "This is the LAST beat: the closing. Quiet, one clear line, the thought that lingers."
-    return f'''{DESIGN_SYSTEM}
+    return f'''{design_system(fmt)}
 
 YOUR BEAT (beat {beat_no} of {n_beats}):
 {role}
@@ -195,24 +207,26 @@ def append_exit(timeline):
     return tl + "\n" + EXIT_FADE + "\n" + HARD_KILL
 
 
-def _big_line_too_long(markup):
-    """Return the text of any .hook-line / .close-line that is too long.
-    These classes do not wrap, so a long line overflows the frame and
-    is cut off (the failure that shipped in entry 3's first render).
-    A line holds at most 4 words / 24 characters."""
+def _big_line_too_long(markup, fmt):
+    """Return the text of any big-text line that is too long for this
+    format. These classes do not wrap, so a long line overflows the
+    frame and is cut off (the failure that shipped in entry 3's first
+    render). Limits come from the format's guardrails."""
+    max_words, max_chars = guardrails.big_text_limits(fmt)
+    classes = "|".join(guardrails.big_text_classes(fmt))
     # find each big-text div and measure its plain text
     for m in re.finditer(
-            r'<div class="(?:hook-line|close-line)"[^>]*>(.*?)</div>',
+            r'<div class="(?:' + classes + r')"[^>]*>(.*?)</div>',
             markup, re.DOTALL):
         inner = m.group(1)
         text = re.sub(r"<[^>]+>", " ", inner)
         text = re.sub(r"\s+", " ", text).strip()
-        if len(text) > 24 or len(text.split()) > 4:
-            return text
+        if len(text) > max_chars or len(text.split()) > max_words:
+            return text, max_words, max_chars
     return None
 
 
-def validate_code(obj):
+def validate_code(obj, fmt="shorts"):
     """Check one beat's generated code. Returns a list of problems.
     Runs on the timeline AFTER append_exit, so the hard kill is
     guaranteed present; validation here is about structure and syntax."""
@@ -245,12 +259,13 @@ def validate_code(obj):
     if bad:
         problems.append(f"markup has unfilled placeholders: {sorted(bad)}")
     # big text lines do not wrap; a long one is cut off at the frame edge
-    long_line = _big_line_too_long(markup)
-    if long_line:
+    too_long = _big_line_too_long(markup, fmt)
+    if too_long:
+        text, max_words, max_chars = too_long
         problems.append(
             f"a big text line is too long and will be cut off: "
-            f"{long_line[:40]!r} (max 4 words / 24 chars per line; "
-            "break it into multiple short lines)")
+            f"{text[:40]!r} (max {max_words} words / {max_chars} chars "
+            "per line; break it into multiple short lines)")
     # the hard kill must be present (append_exit guarantees it; if the
     # brain wrote a timeline that already ends with it, it is kept)
     if HARD_KILL not in timeline:
@@ -269,7 +284,7 @@ def estimate_seconds(beat, script):
     return words / 2.25 + 0.8
 
 
-def codegen(script_obj):
+def codegen(script_obj, fmt="shorts"):
     """One brain call per beat. Returns the code list."""
     script = script_obj["script"]
     beats = script_obj["beats"]
@@ -278,15 +293,15 @@ def codegen(script_obj):
         beat_no = i + 1
         est = estimate_seconds(beat, script)
         obj, provider = generate(
-            DESIGN_SYSTEM,
-            code_prompt(script, beat, beat_no, len(beats), est),
+            design_system(fmt),
+            code_prompt(script, beat, beat_no, len(beats), est, fmt),
             # validate on the timeline with the exit appended, so the
             # brain is judged on the scene, not on remembering the exit
             lambda o: validate_code({
                 "markup": o.get("markup"),
                 "timeline": append_exit(o.get("timeline", ""))
                 if isinstance(o.get("timeline"), str) else o.get("timeline"),
-            }),
+            }, fmt),
             f"code for beat {beat_no}",
         )
         timeline = append_exit(obj["timeline"])
@@ -297,18 +312,26 @@ def codegen(script_obj):
 
 def main():
     if len(sys.argv) < 3:
-        print("usage: codegen.py SCRIPT_JSON OUT_DIR [--regen]", file=sys.stderr)
+        print("usage: codegen.py SCRIPT_JSON OUT_DIR [--regen] [--format shorts|longform]",
+              file=sys.stderr)
         return 2
     script_path, out_dir = sys.argv[1], sys.argv[2]
     regen = "--regen" in sys.argv[3:]
+    fmt = "shorts"
+    for a in sys.argv[3:]:
+        if a.startswith("--format="):
+            fmt = a.split("=", 1)[1]
+    # the format can also come from the script itself (draft.py wrote it)
     os.makedirs(out_dir, exist_ok=True)
     script_obj = json.load(open(script_path))
     if "beats" not in script_obj or "script" not in script_obj:
         print("script.json has no script/beats; run draft.py first",
               file=sys.stderr)
         return 2
-    code = codegen(script_obj)
+    fmt = script_obj.get("format", fmt)
+    code = codegen(script_obj, fmt)
     script_obj["code"] = code
+    script_obj["format"] = fmt
     if regen:
         # Count regenerations so the repair loop can stop after 3
         # instead of looping forever on a stubbornly bad layout.
