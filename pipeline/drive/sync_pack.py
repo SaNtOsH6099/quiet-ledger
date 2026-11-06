@@ -1,0 +1,176 @@
+#!/usr/bin/env python3
+"""Sync the asset pack to Google Drive, idempotently.
+
+The pack's asset files live on Drive, not in the repo: the repo holds
+only the catalog (assets/catalog.json), the tools, and the pipeline
+code. This module uploads a local pack directory to Drive, mirroring
+its relative paths under a Drive folder, and updates files in place
+when they change.
+
+Usage: sync_pack.py --pack-dir assets [--drive-subdir assets] [--dry-run]
+
+  --pack-dir      local directory holding the pack files to upload
+                  (the final normalised SVGs by category, plus
+                  sources/ for provenance). Defaults to "assets".
+  --drive-subdir  Drive folder under DRIVE_FOLDER_ID to mirror into.
+                  Defaults to "assets", so a local
+                  "assets/landmarks/eiffel-tower.svg" lands at
+                  <DRIVE_FOLDER_ID>/assets/landmarks/eiffel-tower.svg
+                  -- the same path the resolver fetches, with the
+                  catalog's "file" field recording the part relative
+                  to the `assets/` folder ("landmarks/eiffel-tower.svg").
+  --dry-run       print what would change without uploading anything.
+
+SVG files only: the catalog, the tools, and the docs live in the repo
+and are never uploaded (they are not .svg files, so the walk skips
+them). The staging intermediates are also skipped (--exclude
+staging), so only the final normalised SVGs and the sources go up.
+
+Idempotency: for each file, the existing Drive file's md5Checksum is
+compared with the local file's md5. Identical files are skipped, so a
+re-run after a small change only uploads the changed files. New files
+are created, changed files are updated in place (same Drive file id,
+so links do not break), and files deleted locally are NOT deleted on
+Drive (deletion is a deliberate, separate step -- a sync must never
+wipe the pack because of a bad local checkout).
+
+Runs in the sync-pack workflow (manual dispatch, on the branch that
+carries the pack files). Needs the Drive secrets (DRIVE_OAUTH_JSON /
+DRIVE_SERVICE_ACCOUNT_JSON / DRIVE_FOLDER_ID). The pack files reach
+Actions on a temporary branch: they are pushed there, the sync
+workflow uploads them to Drive, and the branch is deleted, so the
+main branch never carries the pack files.
+"""
+import argparse
+import hashlib
+import os
+import sys
+
+from pipeline.drive import video_env as env
+
+
+def _md5(path):
+    h = hashlib.md5()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def _drive_md5(service, file_id):
+    """The md5Checksum of a Drive file, or None when Drive has none
+    (Google-native files have no md5; pack files are plain uploads,
+    so they always have one)."""
+    try:
+        meta = service.files().get(
+            fileId=file_id, fields="md5Checksum").execute()
+    except Exception:
+        return None
+    return meta.get("md5Checksum")
+
+
+def _ensure_folder(service, parent_id, rel_dir, cache):
+    """Find or create the Drive folder for rel_dir, relative to
+    parent_id ("" = parent_id itself). Returns its folder id.
+    Results are cached per path in `cache`."""
+    if rel_dir in cache:
+        return cache[rel_dir]
+    folder_id = parent_id
+    walked = []
+    for name in [p for p in rel_dir.split("/") if p]:
+        walked.append(name)
+        key = "/".join(walked)
+        if key in cache:
+            folder_id = cache[key]
+            continue
+        folder_id = env.find_or_create_folder(service, name, folder_id)
+        cache[key] = folder_id
+    cache[rel_dir] = folder_id
+    return folder_id
+
+
+def sync_pack(pack_dir, drive_subdir, dry_run=False, exclude=()):
+    """Upload pack_dir to Drive under drive_subdir. Returns
+    (new, updated, unchanged) counts. `exclude` is a list of path
+    prefixes (relative to pack_dir) to skip, e.g. ["staging",
+    "tools", "catalog-"] -- anything whose relative path starts with
+    one of them is not uploaded. The catalog, the tools, and the
+    staging intermediates live in the repo, not on Drive, so the
+    sync excludes them; only the asset files and the sources go up.
+    """
+    service = env.drive_service()
+    root = os.environ.get("DRIVE_FOLDER_ID")
+    if not root:
+        raise RuntimeError("no Drive folder: set DRIVE_FOLDER_ID")
+    folder_cache = {}
+    base_id = _ensure_folder(service, root, drive_subdir, folder_cache)
+    new, updated, unchanged = 0, 0, 0
+    for dirpath, dirnames, filenames in os.walk(pack_dir):
+        rel_dir = os.path.relpath(dirpath, pack_dir)
+        if rel_dir == ".":
+            rel_dir = ""
+        # Prune excluded directories (and the pack's own staging).
+        dirnames[:] = sorted(
+            d for d in dirnames
+            if d not in ("__pycache__",)
+            and not any((os.path.join(rel_dir, d) if rel_dir else d)
+                        .startswith(p) for p in exclude))
+        folder_id = _ensure_folder(
+            service, base_id, rel_dir, folder_cache)
+        for name in sorted(filenames):
+            # SVG files only: the catalog, the tools, and the docs
+            # live in the repo and are never uploaded.
+            if not name.lower().endswith(".svg"):
+                continue
+            rel_path = os.path.join(rel_dir, name) if rel_dir else name
+            if any(rel_path.startswith(p) for p in exclude):
+                continue
+            local_path = os.path.join(dirpath, name)
+            existing = env.find_file(service, name, folder_id)
+            if existing:
+                if _drive_md5(service, existing) == _md5(local_path):
+                    unchanged += 1
+                    print(f"  = {rel_path} (unchanged)")
+                    continue
+                if dry_run:
+                    print(f"  ~ {rel_path} (would update)")
+                    updated += 1
+                    continue
+                env.upload_file(service, folder_id, local_path, name)
+                updated += 1
+                print(f"  ~ {rel_path} (updated)")
+            else:
+                if dry_run:
+                    print(f"  + {rel_path} (would upload)")
+                    new += 1
+                    continue
+                env.upload_file(service, folder_id, local_path, name)
+                new += 1
+                print(f"  + {rel_path} (new)")
+    return new, updated, unchanged
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="sync the asset pack to Drive (idempotent)")
+    parser.add_argument("--pack-dir", default="assets")
+    parser.add_argument("--drive-subdir", default="assets")
+    parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument("--exclude", action="append", default=[],
+                        help="relative-path prefix to skip (repeatable), "
+                             "e.g. --exclude staging --exclude tools "
+                             "--exclude catalog-")
+    args = parser.parse_args()
+    if not os.path.isdir(args.pack_dir):
+        print(f"pack dir {args.pack_dir!r} not found", file=sys.stderr)
+        return 2
+    new, updated, unchanged = sync_pack(
+        args.pack_dir, args.drive_subdir, dry_run=args.dry_run,
+        exclude=args.exclude)
+    print(f"sync {'(dry run) ' if args.dry_run else ''}done: "
+          f"{new} new, {updated} updated, {unchanged} unchanged")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

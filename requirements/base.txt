@@ -1,4 +1,0 @@
-# Shared by every job. Each job file starts with "-r base.txt" and adds
-# only its own dependencies, so a package is listed in exactly one place.
-Pillow==11.3.0
-numpy==2.5.4

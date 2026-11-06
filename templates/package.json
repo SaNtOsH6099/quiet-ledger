@@ -1,1 +1,0 @@
-{"name":"hf-kinetic","private":true,"scripts":{"check":"npx --yes hyperframes@0.8.188 check","dev":"npx --yes hyperframes@0.8.188 preview","publish":"npx --yes hyperframes@0.8.188 publish","render":"npx --yes hyperframes@0.8.188 render"},"type":"module"}
