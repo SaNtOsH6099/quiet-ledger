@@ -44,9 +44,35 @@ main branch never carries the pack files.
 import argparse
 import hashlib
 import os
+import ssl
 import sys
+import time
 
 from pipeline.drive import video_env as env
+
+
+def _is_transient(exc):
+    """True when a Drive failure is worth rebuilding the service and
+    retrying: an SSL/network failure (including the token-refresh
+    ssl.SSLEOFError that kills a sync after ~1 hour, when the
+    long-lived HTTP connection goes stale) or an auth refresh /
+    401/403 failure. Anything else (a bad file, a bad path, a
+    programming error) is not transient and must fail loudly."""
+    if isinstance(exc, ssl.SSLError):
+        return True
+    try:
+        from google.auth.exceptions import RefreshError
+        if isinstance(exc, RefreshError):
+            return True
+    except ImportError:
+        pass
+    try:
+        from googleapiclient.errors import HttpError
+        if isinstance(exc, HttpError) and exc.resp.status in (401, 403):
+            return True
+    except ImportError:
+        pass
+    return isinstance(exc, OSError)
 
 
 def _md5(path):
@@ -97,13 +123,51 @@ def sync_pack(pack_dir, drive_subdir, dry_run=False, exclude=()):
     one of them is not uploaded. The catalog, the tools, and the
     staging intermediates live in the repo, not on Drive, so the
     sync excludes them; only the asset files and the sources go up.
+
+    Token resilience: the Drive access token lives ~1 hour, and a
+    sync of the whole pack takes longer. The refresh that fires when
+    the token expires can fail (ssl.SSLEOFError on the stale
+    long-lived connection) and kill the run. So the service is
+    rebuilt proactively every 800 files (a fresh token on a fresh
+    connection, well inside the token's life), and every Drive call
+    is retried -- rebuilding the service first -- on a transient
+    failure. The folder cache holds Drive folder ids, which are
+    stable across a rebuild, so it survives.
     """
     service = env.drive_service()
     root = os.environ.get("DRIVE_FOLDER_ID")
     if not root:
         raise RuntimeError("no Drive folder: set DRIVE_FOLDER_ID")
     folder_cache = {}
-    base_id = _ensure_folder(service, root, drive_subdir, folder_cache)
+    files_since_rebuild = [0]
+
+    def _call(fn):
+        """Run fn(service); on a transient Drive failure, rebuild
+        the service and retry (up to 5 times, with backoff)."""
+        nonlocal service
+        for attempt in range(6):
+            try:
+                return fn(service)
+            except Exception as exc:
+                if not _is_transient(exc) or attempt == 5:
+                    raise
+                print(f"  ! transient Drive error ({exc!r}); "
+                      f"rebuilding service, retry {attempt + 1}/5")
+                time.sleep(min(2 ** attempt, 30))
+                service = env.drive_service()
+                files_since_rebuild[0] = 0
+        raise RuntimeError("unreachable")
+
+    def _maybe_rebuild():
+        # Proactive rebuild: a fresh token on a fresh connection
+        # before the ~1-hour token can expire mid-upload.
+        nonlocal service
+        if files_since_rebuild[0] >= 800:
+            service = env.drive_service()
+            files_since_rebuild[0] = 0
+
+    base_id = _call(
+        lambda s: _ensure_folder(s, root, drive_subdir, folder_cache))
     new, updated, unchanged = 0, 0, 0
     for dirpath, dirnames, filenames in os.walk(pack_dir):
         rel_dir = os.path.relpath(dirpath, pack_dir)
@@ -115,8 +179,8 @@ def sync_pack(pack_dir, drive_subdir, dry_run=False, exclude=()):
             if d not in ("__pycache__",)
             and not any((os.path.join(rel_dir, d) if rel_dir else d)
                         .startswith(p) for p in exclude))
-        folder_id = _ensure_folder(
-            service, base_id, rel_dir, folder_cache)
+        folder_id = _call(
+            lambda s: _ensure_folder(s, base_id, rel_dir, folder_cache))
         for name in sorted(filenames):
             # SVG files only: the catalog, the tools, and the docs
             # live in the repo and are never uploaded.
@@ -126,27 +190,36 @@ def sync_pack(pack_dir, drive_subdir, dry_run=False, exclude=()):
             if any(rel_path.startswith(p) for p in exclude):
                 continue
             local_path = os.path.join(dirpath, name)
-            existing = env.find_file(service, name, folder_id)
+            _maybe_rebuild()
+            existing = _call(
+                lambda s: env.find_file(s, name, folder_id))
             if existing:
-                if _drive_md5(service, existing) == _md5(local_path):
+                if _call(lambda s: _drive_md5(s, existing)) == \
+                        _md5(local_path):
                     unchanged += 1
                     print(f"  = {rel_path} (unchanged)")
+                    files_since_rebuild[0] += 1
                     continue
                 if dry_run:
                     print(f"  ~ {rel_path} (would update)")
                     updated += 1
+                    files_since_rebuild[0] += 1
                     continue
-                env.upload_file(service, folder_id, local_path, name)
+                _call(lambda s: env.upload_file(
+                    s, folder_id, local_path, name))
                 updated += 1
                 print(f"  ~ {rel_path} (updated)")
             else:
                 if dry_run:
                     print(f"  + {rel_path} (would upload)")
                     new += 1
+                    files_since_rebuild[0] += 1
                     continue
-                env.upload_file(service, folder_id, local_path, name)
+                _call(lambda s: env.upload_file(
+                    s, folder_id, local_path, name))
                 new += 1
                 print(f"  + {rel_path} (new)")
+            files_since_rebuild[0] += 1
     return new, updated, unchanged
 
 
