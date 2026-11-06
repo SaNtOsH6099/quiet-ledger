@@ -1,0 +1,2 @@
+-r base.txt
+# Pillow only; it comes from base.txt.

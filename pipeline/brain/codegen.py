@@ -40,10 +40,13 @@ import subprocess
 import sys
 import tempfile
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from draft import generate, split_sentences  # noqa: E402
-import guardrails  # noqa: E402
-import css_check  # noqa: E402
+from pipeline.brain.providers import (
+    PROVIDERS_CODEGEN,
+    generate,
+    split_sentences,
+)
+from pipeline.guardrails import rules as guardrails
+from pipeline.guardrails import css_check
 
 
 def design_system(fmt):
@@ -64,11 +67,11 @@ def design_system(fmt):
         "Fill the frame. Build in layers: a background layer (a subtle\n"
         "pattern, a horizon, a grid, a texture), a middle layer (the main\n"
         "subject, drawn with care), and a foreground layer (labels, accents,\n"
-        "small details). Use at least 4 distinct drawn elements and at\n"
-        "least 3 separate animations, staggered through the beat. The scene\n"
-        "must be alive for the whole beat: something draws on, something\n"
-        "moves, something appears. Never leave the frame mostly empty, and\n"
-        "never leave a beat with only one moving part.\n"
+        "small details). Let the scene decide how many elements it needs:\n"
+        "a simple idea needs few, a rich idea needs many. Never leave the\n"
+        "frame mostly empty, and never leave a beat with only one moving\n"
+        "part. The scene must be alive for the whole beat: something draws\n"
+        "on, something moves, something appears.\n"
         "\n"
         + g["prompt"]
         + "\nCANVAS AND LOOK:\n"
@@ -173,8 +176,11 @@ EXIT_FADE = 'tl.to("#%%ID%%", { opacity: 0, duration: 0.4 }, E - 0.4);'
 HARD_KILL = 'tl.set("#%%ID%%", { opacity: 0 }, E);'
 
 
-def code_prompt(script, beat, beat_no, n_beats, est_seconds, fmt):
-    """One beat's code-writing prompt."""
+def code_prompt(script, beats, beat, beat_no, n_beats, est_seconds, fmt):
+    """One beat's code-writing prompt. The brain gets the FULL script
+    and story in context, so it knows where this beat sits and what
+    came before and after, but it writes ONLY this one beat's scene.
+    One beat at a time, with the whole story in mind."""
     sentences = split_sentences(script)
     spoken = " ".join(sentences[n] for n in beat["sentences"])
     role = ""
@@ -182,14 +188,31 @@ def code_prompt(script, beat, beat_no, n_beats, est_seconds, fmt):
         role = "This is the FIRST beat: the hook. It must stop a scroller. Big, bold, immediate."
     elif beat_no == n_beats:
         role = "This is the LAST beat: the closing. Quiet, one clear line, the thought that lingers."
+    # Neighbouring beats, so the scene fits the flow and the subject
+    # stays the same across beats (the tower must look the same in
+    # every shot, not a different drawing each time).
+    prev_idea = ""
+    if beat_no > 1:
+        prev_idea = (f"\nThe beat before this one shows: "
+                     f"{beats[beat_no - 2]['idea']}")
+    next_idea = ""
+    if beat_no < n_beats:
+        next_idea = (f"\nThe beat after this one will show: "
+                     f"{beats[beat_no]['idea']}")
     return f'''{design_system(fmt)}
 
-YOUR BEAT (beat {beat_no} of {n_beats}):
+THE WHOLE STORY (so you know where this beat sits):
+"{script}"
+
+YOUR BEAT (beat {beat_no} of {n_beats}) — make ONLY this beat's scene:
 {role}
 The narration for this beat says: "{spoken}"
-Visual idea: {beat["idea"]}
+Visual idea: {beat["idea"]}{prev_idea}{next_idea}
 About {est_seconds:.1f} seconds long. Pace the animation to fill that
 time: build, hold, then stop. Do not rush; do not leave dead air.
+Keep the subject consistent with the beats around it: if the story
+shows the same object (a tower, a person, a place), draw it the same
+way here as in the neighbouring beats.
 
 Return ONLY a JSON object with this exact shape:
 {{
@@ -336,7 +359,7 @@ def codegen(script_obj, fmt="shorts"):
         est = estimate_seconds(beat, script)
         obj, provider = generate(
             design_system(fmt),
-            code_prompt(script, beat, beat_no, len(beats), est, fmt),
+            code_prompt(script, beats, beat, beat_no, len(beats), est, fmt),
             # validate on the timeline with the exit appended, so the
             # brain is judged on the scene, not on remembering the exit
             lambda o: validate_code({
@@ -345,6 +368,9 @@ def codegen(script_obj, fmt="shorts"):
                 if isinstance(o.get("timeline"), str) else o.get("timeline"),
             }, fmt),
             f"code for beat {beat_no}",
+            # Scene code is the most demanding task: try the most
+            # capable model first (Nemotron 550B on NVIDIA NIM).
+            order=PROVIDERS_CODEGEN,
         )
         timeline = append_exit(obj["timeline"])
         code.append({"markup": obj["markup"], "timeline": timeline})

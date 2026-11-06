@@ -31,8 +31,7 @@ import os
 import re
 import sys
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import guardrails  # noqa: E402
+from pipeline.guardrails import rules as guardrails
 
 # Fallback per-character width (fraction of the font size) when PIL or
 # the font file is unavailable. Bold sans-serif is wider than regular.
@@ -115,7 +114,8 @@ def check_markup(markup, fmt="shorts"):
     right_edge = g["margins"]["right"]
     # The base template's CSS is the source of truth for font sizes.
     templates_dir = os.path.join(
-        os.path.dirname(os.path.abspath(__file__)), "..", "templates")
+        os.path.dirname(os.path.abspath(__file__)), "..", "..",
+        "templates")
     base_path = os.path.join(templates_dir, g["base_template"])
     try:
         css = open(base_path).read()

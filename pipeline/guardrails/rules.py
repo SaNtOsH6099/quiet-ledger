@@ -107,8 +107,9 @@ DEFAULTS = {
 def _load():
     """Load guardrails.json next to this module; fall back to DEFAULTS
     if it is missing or unreadable. Never crash on a bad config."""
+    # config/guardrails.json, two levels up from pipeline/guardrails/
     path = os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                        "..", "guardrails.json")
+                        "..", "..", "config", "guardrails.json")
     try:
         with open(path) as f:
             data = json.load(f)

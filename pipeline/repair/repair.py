@@ -19,12 +19,12 @@ import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from draft import generate  # noqa: E402 - reuse the brain rotation
+from pipeline.brain.providers import generate  # reuse the brain rotation
 
 # Files the brain is allowed to fix. Keep this narrow on purpose: the
 # repair loop must not rewrite secrets, the queue, or the workflow's
 # own repair logic.
-REPAIRABLE_DIRS = ("scripts", "templates")
+REPAIRABLE_DIRS = ("pipeline", "templates", "config")
 REPAIRABLE_EXTS = (".py", ".html", ".json")
 # The workflow file itself is repairable too (ffmpeg installs live there).
 REPAIRABLE_FILES = (".github/workflows/pipeline.yml",)

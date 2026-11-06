@@ -63,9 +63,9 @@ jobs:
         with:
           python-version: "3.12"
       - name: reject stdlib-shadowing filenames
-        run: python3 scripts/check_no_shadow.py
+        run: python3 -m pipeline.tools.check_no_shadow
       - name: install Drive tools
-        run: python3 -m pip install -q -r requirements-drive.txt
+        run: python3 -m pip install -q -r requirements/drive.txt
       - name: resolve the topic
         id: topic
         env:
@@ -79,7 +79,7 @@ jobs:
           topic = os.environ.get("TOPIC_INPUT", "").strip()
           entry_id = ""
           if not topic:
-              r = subprocess.run([sys.executable, "scripts/drive_queue.py", "next", "--status", "idea"],
+              r = subprocess.run([sys.executable, "-m", "pipeline.drive.drive_queue", "next", "--status", "idea"],
                                  capture_output=True, text=True)
               if r.returncode != 0:
                   print("no topic given and no 'idea' entry in the queue", file=sys.stderr)
@@ -97,7 +97,7 @@ jobs:
           GROQ_API_KEYS: ${{ secrets.GROQ_API_KEYS }}
           GEMINI_API_KEYS: ${{ secrets.GEMINI_API_KEYS }}
           NVIDIA_API_KEYS: ${{ secrets.NVIDIA_API_KEYS }}
-        run: python3 scripts/draft.py "${{ steps.topic.outputs.topic }}" out --format=${{ inputs.format }}
+        run: python3 -m pipeline.brain.draft "${{ steps.topic.outputs.topic }}" out --format=${{ inputs.format }}
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
@@ -106,7 +106,7 @@ jobs:
           GROQ_API_KEYS: ${{ secrets.GROQ_API_KEYS }}
           GEMINI_API_KEYS: ${{ secrets.GEMINI_API_KEYS }}
           NVIDIA_API_KEYS: ${{ secrets.NVIDIA_API_KEYS }}
-        run: python3 scripts/codegen.py out/script.json out --format=${{ inputs.format }}
+        run: python3 -m pipeline.brain.codegen out/script.json out --format=${{ inputs.format }}
       - uses: actions/upload-artifact@v4
         with:
           name: draft
@@ -122,9 +122,9 @@ jobs:
           if [ -n "${{ steps.topic.outputs.entry_id }}" ]; then
             ID="${{ steps.topic.outputs.entry_id }}"
           else
-            ID=$(python3 scripts/drive_queue.py add --topic "${{ steps.topic.outputs.topic }}" | python3 -c "import json,sys; print(json.load(sys.stdin)['id'])")
+            ID=$(python3 -m pipeline.drive.drive_queue add --topic "${{ steps.topic.outputs.topic }}" | python3 -c "import json,sys; print(json.load(sys.stdin)['id'])")
           fi
-          python3 scripts/drive_queue.py update --id "$ID" --status script-ready --script-file out/script.json
+          python3 -m pipeline.drive.drive_queue update --id "$ID" --status script-ready --script-file out/script.json
           echo "queue_id=$ID" >> "$GITHUB_OUTPUT"
 
   voice:
@@ -138,13 +138,13 @@ jobs:
         with:
           python-version: "3.12"
       - name: reject stdlib-shadowing filenames
-        run: python3 scripts/check_no_shadow.py
+        run: python3 -m pipeline.tools.check_no_shadow
       - name: install Drive tools
-        run: python3 -m pip install -q -r requirements-drive.txt
+        run: python3 -m pip install -q -r requirements/drive.txt
       - name: install speech tools
         run: |
           sudo apt-get update -qq && sudo apt-get install -y -qq espeak-ng
-          python3 -m pip install -q -r requirements-voice.txt
+          python3 -m pip install -q -r requirements/voice.txt
       - name: fetch the approved entry
         id: entry
         env:
@@ -156,7 +156,7 @@ jobs:
           python3 - <<'PY'
           import json, os, subprocess, sys
           qid = os.environ.get("QUEUE_ID_INPUT", "").strip()
-          cmd = [sys.executable, "scripts/drive_queue.py"]
+          cmd = [sys.executable, "-m", "pipeline.drive.drive_queue"]
           cmd += ["get", "--id", qid] if qid else ["next", "--status", "approved"]
           r = subprocess.run(cmd, capture_output=True, text=True)
           if r.returncode != 0:
@@ -186,9 +186,9 @@ jobs:
           DRIVE_FOLDER_ID: ${{ secrets.DRIVE_FOLDER_ID }}
         run: |
           ID=$(python3 -c "import json; print(json.load(open('out/meta.json'))['queue_id'])")
-          python3 scripts/drive_queue.py update --id "$ID" --status rendering
+          python3 -m pipeline.drive.drive_queue update --id "$ID" --status rendering
       - name: narrate
-        run: python3 scripts/voice.py --script out/script.json --out out/narration.wav
+        run: python3 -m pipeline.render.voice --script out/script.json --out out/narration.wav
       - uses: actions/upload-artifact@v4
         with:
           name: voice
@@ -210,7 +210,7 @@ jobs:
         with:
           node-version: "22"
       - name: install transcription tools
-        run: python3 -m pip install -q -r requirements-scenes.txt
+        run: python3 -m pip install -q -r requirements/scenes.txt
       - name: install ffmpeg
         run: sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg
       - uses: actions/download-artifact@v4
@@ -218,7 +218,7 @@ jobs:
           name: voice
           path: out/
       - name: draw and render the scenes
-        run: python3 scripts/render.py --scenes out/script.json --audio out/narration.wav --templates templates --out-dir out --work-dir work/hf
+        run: python3 -m pipeline.render.render --scenes out/script.json --audio out/narration.wav --templates templates --out-dir out --work-dir work/hf
       - uses: actions/upload-artifact@v4
         with:
           name: scenes
@@ -241,7 +241,7 @@ jobs:
           name: scenes
           path: out/
       - name: build the caption file
-        run: python3 scripts/captions.py --words out/words.json --script out/script.json --out out/captions.ass
+        run: python3 -m pipeline.render.captions --words out/words.json --script out/script.json --out out/captions.ass
       - uses: actions/upload-artifact@v4
         with:
           name: captions
@@ -276,7 +276,7 @@ jobs:
       - name: assemble
         run: |
           TOTAL=$(python3 -c "import json; print(json.load(open('out/timings.json'))['total'])")
-          python3 scripts/assemble.py --video out/silent.mp4 --audio out/narration.wav --captions out/captions.ass --out out/final.mp4 --duration "$TOTAL"
+          python3 -m pipeline.render.assemble --video out/silent.mp4 --audio out/narration.wav --captions out/captions.ass --out out/final.mp4 --duration "$TOTAL"
       - uses: actions/upload-artifact@v4
         with:
           name: final
@@ -295,13 +295,13 @@ jobs:
         with:
           python-version: "3.12"
       - name: install image tools
-        run: python3 -m pip install -q -r requirements-thumbnail.txt
+        run: python3 -m pip install -q -r requirements/thumbnail.txt
       - uses: actions/download-artifact@v4
         with:
           name: scenes
           path: out/
       - name: draw the thumbnail
-        run: python3 scripts/thumbnail.py --script out/script.json --out out/thumbnail.png
+        run: python3 -m pipeline.render.thumbnail --script out/script.json --out out/thumbnail.png
       - uses: actions/upload-artifact@v4
         with:
           name: thumbnail
@@ -320,7 +320,7 @@ jobs:
         with:
           python-version: "3.12"
       - name: install Drive tools
-        run: python3 -m pip install -q -r requirements-drive.txt
+        run: python3 -m pip install -q -r requirements/drive.txt
       - uses: actions/download-artifact@v4
         with:
           name: final
@@ -337,7 +337,7 @@ jobs:
         run: |
           ID=$(python3 -c "import json; print(json.load(open('out/meta.json'))['queue_id'])")
           TOPIC=$(python3 -c "import json; print(json.load(open('out/meta.json'))['topic'])")
-          python3 scripts/upload_drive.py --file out/final.mp4 --thumbnail out/thumbnail.png --queue-id "$ID" --topic "$TOPIC"
+          python3 -m pipeline.drive.upload_drive --file out/final.mp4 --thumbnail out/thumbnail.png --queue-id "$ID" --topic "$TOPIC"
 
   repair:
     name: repair the code with the brain
@@ -356,7 +356,7 @@ jobs:
         with:
           python-version: "3.12"
       - name: install Drive tools
-        run: python3 -m pip install -q -r requirements-drive.txt
+        run: python3 -m pip install -q -r requirements/drive.txt
       - name: stop after three consecutive repairs
         run: |
           if [ "$(git log --format=%s -3 | grep -c '^repair:')" -eq 3 ]; then
@@ -368,7 +368,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          python3 scripts/fetch_failed_log.py --run-id "$GITHUB_RUN_ID" --repo "${{ github.repository }}" --out error.txt
+          python3 -m pipeline.repair.fetch_failed_log --run-id "$GITHUB_RUN_ID" --repo "${{ github.repository }}" --out error.txt
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
@@ -383,7 +383,7 @@ jobs:
           DRIVE_FOLDER_ID: ${{ secrets.DRIVE_FOLDER_ID }}
         run: |
           set +e
-          python3 scripts/repair.py --error-file error.txt
+          python3 -m pipeline.repair.repair --error-file error.txt
           RC=$?
           set -e
           echo "repair_exit=$RC" >> "$GITHUB_OUTPUT"
@@ -391,19 +391,19 @@ jobs:
             echo "scene code is bad; regenerating it"
             QID="${{ github.event.inputs.queue_id }}"
             if [ -z "$QID" ]; then
-              QID=$(python3 scripts/drive_queue.py next --status rendering | python3 -c "import json,sys; print(json.load(sys.stdin)['id'])" 2>/dev/null || echo "")
+              QID=$(python3 -m pipeline.drive.drive_queue next --status rendering | python3 -c "import json,sys; print(json.load(sys.stdin)['id'])" 2>/dev/null || echo "")
             fi
             if [ -z "$QID" ]; then echo "could not determine queue entry"; exit 1; fi
             echo "queue_id=$QID" >> "$GITHUB_OUTPUT"
-            python3 scripts/drive_queue.py get --id "$QID" > /tmp/entry.json
+            python3 -m pipeline.drive.drive_queue get --id "$QID" > /tmp/entry.json
             python3 -c "import json; e=json.load(open('/tmp/entry.json')); json.dump(e['script'], open('/tmp/script.json','w'), indent=2)"
-            python3 scripts/codegen.py /tmp/script.json /tmp/codeout --regen
+            python3 -m pipeline.brain.codegen /tmp/script.json /tmp/codeout --regen
             REGEN=$(python3 -c "import json; print(json.load(open('/tmp/codeout/script.json')).get('code_regen_count', 0))")
             if [ "$REGEN" -gt 3 ]; then
               echo "scene code regenerated $REGEN times and still failing; a human needs to look"
               exit 1
             fi
-            python3 scripts/drive_queue.py update --id "$QID" --status rendering --script-file /tmp/codeout/script.json
+            python3 -m pipeline.drive.drive_queue update --id "$QID" --status rendering --script-file /tmp/codeout/script.json
             echo "regenerated the scene code for queue entry $QID (attempt $REGEN)"
           elif [ "$RC" -ne 0 ]; then
             echo "repair.py failed with exit $RC"
@@ -419,7 +419,7 @@ jobs:
         run: |
           if [ "${{ steps.fix.outputs.repair_exit }}" = "3" ]; then
             QID="${{ steps.fix.outputs.queue_id }}"
-            python3 scripts/drive_queue.py update --id "$QID" --status approved
+            python3 -m pipeline.drive.drive_queue update --id "$QID" --status approved
             echo "reset queue entry $QID to approved"
             gh workflow run pipeline.yml --ref main -f stage=render -f queue_id="$QID"
             echo "re-triggered render for queue entry $QID"
@@ -436,10 +436,10 @@ jobs:
           git push
           QID="${{ github.event.inputs.queue_id }}"
           if [ -z "$QID" ]; then
-            QID=$(python3 scripts/drive_queue.py next --status rendering | python3 -c "import json,sys; print(json.load(sys.stdin)['id'])" 2>/dev/null || echo "")
+            QID=$(python3 -m pipeline.drive.drive_queue next --status rendering | python3 -c "import json,sys; print(json.load(sys.stdin)['id'])" 2>/dev/null || echo "")
           fi
           if [ -n "$QID" ]; then
-            python3 scripts/drive_queue.py update --id "$QID" --status approved
+            python3 -m pipeline.drive.drive_queue update --id "$QID" --status approved
             echo "reset queue entry $QID to approved"
             gh workflow run pipeline.yml --ref main -f stage=render -f queue_id="$QID"
             echo "re-triggered render for queue entry $QID"

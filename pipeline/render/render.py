@@ -34,9 +34,7 @@ import shutil
 import subprocess
 import sys
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-
-import guardrails  # noqa: E402 - format canvas + base template
+from pipeline.guardrails import rules as guardrails  # format canvas + base template
 
 W, H = 1080, 1920
 

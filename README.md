@@ -9,6 +9,12 @@ Every visual is drawn in code: line drawings, animated charts, stick
 figures, diagrams, kinetic text. No photos, no stock, no generated
 imagery of any kind.
 
+The pipeline is organized by stage under `pipeline/` (brain,
+guardrails, render, drive, repair, tools). Each stage reads its input
+from a file and writes its output to a file; the handoff between stages
+is the file. See `PIPELINE.md` for the stage list, what each stage
+consumes and produces, the brain rotation, and the guardrails.
+
 ## How one idea becomes a finished file
 
 1. An idea goes into the queue (a `queue.json` file in Drive).
@@ -16,7 +22,9 @@ imagery of any kind.
    beat), and writes the scene code itself: the HTML/SVG markup and the
    animation timeline for each beat, invented for that scene. No fixed
    templates; different scenes get different code because the story is
-   different.
+   different. The brain gets the full script and story in context and
+   writes one beat at a time, so each scene fits the flow and the
+   subject stays the same across beats.
 3. You read the draft and approve it.
 4. Kokoro narrates it in one continuous take.
 5. The brain-written scene code is rendered into the silent scenes.
