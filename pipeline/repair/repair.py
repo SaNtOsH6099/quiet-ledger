@@ -2,7 +2,7 @@
 """Self-repair: ask the pipeline's own brain to fix broken code.
 
 When a render run fails, the repair job feeds the error text and the
-repo's code files to the brain (the same Groq -> Gemini -> NVIDIA
+repo's code files to the brain (the same NVIDIA -> Groq -> local
 rotation draft.py uses). The brain diagnoses which file is wrong and
 returns the corrected full file content. This script validates the fix
 (python compiles, yaml parses) and writes it back.
@@ -10,7 +10,7 @@ returns the corrected full file content. This script validates the fix
 Usage: repair.py --error "the error text" [--repo .] [--dry-run]
        repair.py --error-file error.txt [--repo .]
 Stdlib only. Keys come from the environment, never from files:
-  GROQ_API_KEYS, GEMINI_API_KEYS, NVIDIA_API_KEYS
+  GROQ_API_KEYS, NVIDIA_API_KEYS
 """
 import argparse
 import ast

@@ -1,15 +1,18 @@
 #!/usr/bin/env python3
 """The brain: provider rotation for the pipeline's AI calls.
 
-Calls the brain providers in order (Groq -> Gemini -> NVIDIA -> local
-small model if one is configured). Each provider takes a comma-separated
+Calls the brain providers in order (NVIDIA -> Groq -> local small
+model if one is configured). Each provider takes a comma-separated
 list of keys in one secret, and the rotation tries every key of a
 provider before moving to the next:
-  GROQ_API_KEYS, GEMINI_API_KEYS, NVIDIA_API_KEYS
+  NVIDIA_API_KEYS, GROQ_API_KEYS
   LLAMA_MODEL_PATH (optional, local lifeboat leg)
-Provider order: Groq, Gemini, NVIDIA NIM, local.
+Provider order: NVIDIA NIM, Groq, local.
 NOTE: NVIDIA NIM free access is prototyping-only per NVIDIA's own FAQ,
 so it is a fallback leg here, never the primary brain.
+Gemini was removed 2026-11-06 (user decision): its free tier is 20
+requests/day and it 503s under high demand, so it is not reliable
+enough for the pipeline. Its keys are no longer read.
 
 Stdlib only. Keys come from the environment, never from files.
 Used by draft.py (script + beats), codegen.py (scene code), and
@@ -45,7 +48,7 @@ class RetryableFailure(Exception):
     next key (or the same key again on a later pass)."""
 
 
-def _post_json(url, headers, payload, timeout=120):
+def _post_json(url, headers, payload, timeout=120, attempts=3):
     # Groq's API sits behind Cloudflare, whose edge blocks the default
     # Python user agent (HTTP 403, error code 1010). A browser user
     # agent passes the check; the call itself is a normal authenticated
@@ -58,7 +61,7 @@ def _post_json(url, headers, payload, timeout=120):
         **headers,
     }
     data = json.dumps(payload).encode("utf-8")
-    for attempt in range(3):
+    for attempt in range(attempts):
         req = urllib.request.Request(
             url,
             data=data,
@@ -76,7 +79,7 @@ def _post_json(url, headers, payload, timeout=120):
                 raise RetryableFailure(
                     "HTTP 400: model output failed JSON validation"
                 )
-            if e.code in (500, 502, 503, 504) and attempt < 2:
+            if e.code in (500, 502, 503, 504) and attempt < attempts - 1:
                 wait = 5 if attempt == 0 else 15
                 print(f"  transient HTTP {e.code}, retrying in {wait}s",
                       flush=True)
@@ -84,7 +87,7 @@ def _post_json(url, headers, payload, timeout=120):
                 continue
             raise ProviderFailure(f"HTTP {e.code}: {body}")
         except OSError as e:
-            if attempt < 2:
+            if attempt < attempts - 1:
                 wait = 5 if attempt == 0 else 15
                 print(f"  request failed ({e}), retrying in {wait}s",
                       flush=True)
@@ -112,27 +115,6 @@ def call_groq(key, system, user):
     )["choices"][0]["message"]["content"]
 
 
-def call_gemini(key, system, user):
-    # gemini-2.5-flash was retired for new users; Google's own error
-    # message points at gemini-3.8-flash. Override with GEMINI_MODEL.
-    model = os.environ.get("GEMINI_MODEL", "gemini-3.8-flash")
-    resp = _post_json(
-        "https://generativelanguage.googleapis.com/v1beta/models/"
-        f"{model}:generateContent?key=" + key,
-        {"Content-Type": "application/json"},
-        {
-            "system_instruction": {"parts": [{"text": system}]},
-            "contents": [{"parts": [{"text": user}]}],
-            "generationConfig": {
-                "responseMimeType": "application/json",
-                "temperature": 0.7,
-                "maxOutputTokens": 65236,
-            },
-        },
-    )
-    return resp["candidates"][0]["content"]["parts"][0]["text"]
-
-
 NVIDIA_MODELS = [
     # Best capable first. Tested 2026-11-06 against the user's keys:
     # the 550B replies, the 30B replies, the 120B returns 404 (not
@@ -152,6 +134,16 @@ def call_nvidia(key, system, user):
     # to the next model instead of abandoning the leg. Override the
     # list with NVIDIA_MODELS (comma-separated) or a single model with
     # NVIDIA_MODEL.
+    # Key rotation: the caller (generate) tries every NVIDIA key in
+    # turn, but ONLY when this function raises KeyFailure. So a key
+    # whose models all fail (timeout, 5xx, or 404 on every model)
+    # raises KeyFailure, and the next key gets its turn. A timeout
+    # used to raise ProviderFailure, which abandoned the whole NVIDIA
+    # leg after key 1 and never tried keys 2-4 (the failure in run
+    # 42191385065). One inner attempt only (attempts=1): the key and
+    # model rotation IS the retry, so no point retrying the same call.
+    # The 550B is a reasoning model and needs time to produce code, so
+    # it gets a 120s timeout; the lighter fallback models get 45s.
     models = os.environ.get("NVIDIA_MODELS")
     if models:
         candidates = [m.strip() for m in models.split(",") if m.strip()]
@@ -160,7 +152,8 @@ def call_nvidia(key, system, user):
     else:
         candidates = NVIDIA_MODELS
     last_error = None
-    for model in candidates:
+    for i, model in enumerate(candidates):
+        timeout = 120 if i == 0 else 45
         try:
             return _post_json(
                 "https://integrate.api.nvidia.com/v1/chat/completions",
@@ -176,21 +169,25 @@ def call_nvidia(key, system, user):
                     "temperature": 0.7,
                     "max_tokens": 65700,
                 },
-                timeout=45,
+                timeout=timeout,
+                attempts=1,
             )["choices"][0]["message"]["content"]
+        except KeyFailure:
+            # Auth or rate limit on this key: the rotation tries the
+            # next key, so do not try more models on this one.
+            raise
         except ProviderFailure as e:
             if "HTTP 404" in str(e):
                 print(f"  nvidia model {model} not available to this "
                       "account", flush=True)
-                last_error = e
-                continue
-            raise
-        except (TimeoutError, OSError) as e:
-            print(f"  nvidia model {model} timed out, trying next",
-                  flush=True)
-            last_error = ProviderFailure(f"timeout on {model}: {e}")
+            else:
+                print(f"  nvidia model {model} failed ({e}), trying "
+                      "next model", flush=True)
+            last_error = e
             continue
-    raise last_error if last_error else ProviderFailure("no NVIDIA model answered")
+    raise KeyFailure(
+        f"all NVIDIA models failed on this key: {last_error}"
+    )
 
 
 def call_local(_key, system, user):
@@ -216,7 +213,6 @@ def call_local(_key, system, user):
 # Keys are tried in order within a provider; a 429 or auth error moves to
 # the next key, any other failure moves to the next provider.
 PROVIDERS = [
-    ("gemini", "GEMINI_API_KEYS", call_gemini),
     ("nvidia", "NVIDIA_API_KEYS", call_nvidia),
     ("groq", "GROQ_API_KEYS", call_groq),
     ("local", None, call_local),
@@ -224,11 +220,10 @@ PROVIDERS = [
 
 # Codegen (writing scene code) is the most demanding task, so it tries
 # the most capable model first: the Nemotron 550B on NVIDIA NIM, which
-# replies (tested 2026-11-06). Falls back to Gemini, then Groq last
-# (tightest free-tier TPM), then the local lifeboat.
+# replies (tested 2026-11-06). Falls back to Groq last (tightest
+# free-tier TPM), then the local lifeboat.
 PROVIDERS_CODEGEN = [
     ("nvidia", "NVIDIA_API_KEYS", call_nvidia),
-    ("gemini", "GEMINI_API_KEYS", call_gemini),
     ("groq", "GROQ_API_KEYS", call_groq),
     ("local", None, call_local),
 ]

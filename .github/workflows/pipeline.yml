@@ -95,7 +95,6 @@ jobs:
       - name: draft with the brain
         env:
           GROQ_API_KEYS: ${{ secrets.GROQ_API_KEYS }}
-          GEMINI_API_KEYS: ${{ secrets.GEMINI_API_KEYS }}
           NVIDIA_API_KEYS: ${{ secrets.NVIDIA_API_KEYS }}
         run: python3 -m pipeline.brain.draft "${{ steps.topic.outputs.topic }}" out --format=${{ inputs.format }}
       - uses: actions/setup-node@v4
@@ -104,7 +103,6 @@ jobs:
       - name: write the scene code with the brain
         env:
           GROQ_API_KEYS: ${{ secrets.GROQ_API_KEYS }}
-          GEMINI_API_KEYS: ${{ secrets.GEMINI_API_KEYS }}
           NVIDIA_API_KEYS: ${{ secrets.NVIDIA_API_KEYS }}
         run: python3 -m pipeline.brain.codegen out/script.json out --format=${{ inputs.format }}
       - uses: actions/upload-artifact@v4
@@ -217,7 +215,6 @@ jobs:
       - name: refresh the scene code if it is stale
         env:
           GROQ_API_KEYS: ${{ secrets.GROQ_API_KEYS }}
-          GEMINI_API_KEYS: ${{ secrets.GEMINI_API_KEYS }}
           NVIDIA_API_KEYS: ${{ secrets.NVIDIA_API_KEYS }}
           DRIVE_OAUTH_JSON: ${{ secrets.DRIVE_OAUTH_JSON }}
           DRIVE_SERVICE_ACCOUNT_JSON: ${{ secrets.DRIVE_SERVICE_ACCOUNT_JSON }}
@@ -489,7 +486,6 @@ jobs:
         id: fix
         env:
           GROQ_API_KEYS: ${{ secrets.GROQ_API_KEYS }}
-          GEMINI_API_KEYS: ${{ secrets.GEMINI_API_KEYS }}
           NVIDIA_API_KEYS: ${{ secrets.NVIDIA_API_KEYS }}
           DRIVE_OAUTH_JSON: ${{ secrets.DRIVE_OAUTH_JSON }}
           DRIVE_SERVICE_ACCOUNT_JSON: ${{ secrets.DRIVE_SERVICE_ACCOUNT_JSON }}

@@ -31,7 +31,7 @@ that cannot be written fails the draft instead of shipping bad code.
 
 Stdlib only, except node for the JS syntax check. Keys come from the
 environment, never from files. Reuses draft.generate for the brain
-rotation (Groq -> Gemini -> NVIDIA -> local).
+rotation (NVIDIA -> Groq -> local).
 """
 import json
 import os

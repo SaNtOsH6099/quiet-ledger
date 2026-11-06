@@ -92,9 +92,10 @@ this runs on the real frames, so it catches what they cannot see.
 call (draft, codegen, repair) goes through `generate()` there, so the
 rotation lives in exactly one place.
 
-- Default order (draft, repair): Gemini -> NVIDIA -> Groq -> local.
+- Default order (draft, repair): NVIDIA -> Groq -> local. Gemini was
+  removed 2026-11-06: 20 requests/day free tier, 503s under demand.
 - Codegen order (writing scene code is the most demanding task):
-  NVIDIA -> Gemini -> Groq -> local. The NVIDIA leg tries the Nemotron
+  NVIDIA -> Groq -> local. The NVIDIA leg tries the Nemotron
   550B first (tested 2026-11-06: it replies), then the 30B. Groq is
   LAST in both orders (its free TPM is only 8000, the tightest).
 - Keys come from the environment (GitHub Secrets), never from files.
