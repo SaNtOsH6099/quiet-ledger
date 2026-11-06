@@ -92,6 +92,15 @@ jobs:
           GEMINI_API_KEYS: ${{ secrets.GEMINI_API_KEYS }}
           NVIDIA_API_KEYS: ${{ secrets.NVIDIA_API_KEYS }}
         run: python3 scripts/draft.py "${{ steps.topic.outputs.topic }}" out
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: write the scene code with the brain
+        env:
+          GROQ_API_KEYS: ${{ secrets.GROQ_API_KEYS }}
+          GEMINI_API_KEYS: ${{ secrets.GEMINI_API_KEYS }}
+          NVIDIA_API_KEYS: ${{ secrets.NVIDIA_API_KEYS }}
+        run: python3 scripts/codegen.py out/script.json out
       - uses: actions/upload-artifact@v4
         with:
           name: draft
@@ -354,12 +363,42 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           python3 scripts/fetch_failed_log.py --run-id "$GITHUB_RUN_ID" --repo "${{ github.repository }}" --out error.txt
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
       - name: ask the brain for a fix
+        id: fix
         env:
           GROQ_API_KEYS: ${{ secrets.GROQ_API_KEYS }}
           GEMINI_API_KEYS: ${{ secrets.GEMINI_API_KEYS }}
           NVIDIA_API_KEYS: ${{ secrets.NVIDIA_API_KEYS }}
-        run: python3 scripts/repair.py --error-file error.txt
+          DRIVE_OAUTH_JSON: ${{ secrets.DRIVE_OAUTH_JSON }}
+          DRIVE_SERVICE_ACCOUNT_JSON: ${{ secrets.DRIVE_SERVICE_ACCOUNT_JSON }}
+          DRIVE_FOLDER_ID: ${{ secrets.DRIVE_FOLDER_ID }}
+        run: |
+          set +e
+          python3 scripts/repair.py --error-file error.txt
+          RC=$?
+          set -e
+          echo "repair_exit=$RC" >> "$GITHUB_OUTPUT"
+          if [ "$RC" -eq 3 ]; then
+            echo "scene code is bad; regenerating it"
+            QID="${{ github.event.inputs.queue_id }}"
+            if [ -z "$QID" ]; then
+              QID=$(python3 scripts/drive_queue.py next --status rendering | python3 -c "import json,sys; print(json.load(sys.stdin)['id'])" 2>/dev/null || echo "")
+            fi
+            if [ -z "$QID" ]; then echo "could not determine queue entry"; exit 1; fi
+            echo "queue_id=$QID" >> "$GITHUB_OUTPUT"
+            python3 scripts/drive_queue.py get --id "$QID" > /tmp/entry.json
+            python3 -c "import json; e=json.load(open('/tmp/entry.json')); json.dump(e['script'], open('/tmp/script.json','w'), indent=2)"
+            python3 scripts/codegen.py /tmp/script.json /tmp/codeout
+            python3 scripts/drive_queue.py update --id "$QID" --status rendering --script-file /tmp/codeout/script.json
+            echo "regenerated the scene code for queue entry $QID"
+          elif [ "$RC" -ne 0 ]; then
+            echo "repair.py failed with exit $RC"
+            exit "$RC"
+          fi
+          exit 0
       - name: commit the fix, reset the entry, and retry
         env:
           GH_TOKEN: ${{ github.token }}
@@ -367,6 +406,14 @@ jobs:
           DRIVE_SERVICE_ACCOUNT_JSON: ${{ secrets.DRIVE_SERVICE_ACCOUNT_JSON }}
           DRIVE_FOLDER_ID: ${{ secrets.DRIVE_FOLDER_ID }}
         run: |
+          if [ "${{ steps.fix.outputs.repair_exit }}" = "3" ]; then
+            QID="${{ steps.fix.outputs.queue_id }}"
+            python3 scripts/drive_queue.py update --id "$QID" --status approved
+            echo "reset queue entry $QID to approved"
+            gh workflow run pipeline.yml --ref main -f stage=render -f queue_id="$QID"
+            echo "re-triggered render for queue entry $QID"
+            exit 0
+          fi
           if git diff --quiet; then
             echo "repair made no change; nothing to commit"
             exit 0

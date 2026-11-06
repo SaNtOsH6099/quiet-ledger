@@ -5,8 +5,10 @@ Two brain calls, each one simple: first the script alone (strict JSON
 {"script": "..."}), then the beats for that script (strict JSON
 {"beats": [...]}). The script is one continuous narration, about 70-90
 words. Each beat covers one or more sentences of the script and carries
-the data one drawn scene needs. Output is validated hard: a bad draft
-fails the run instead of producing a broken file downstream.
+a short visual idea for what the scene should show. There are no fixed
+beat types; the idea is the brain's creative direction, and codegen.py
+turns it into the actual scene code. Output is validated hard: a bad
+draft fails the run instead of producing a broken file downstream.
 A single call asking for script and beats together failed six test runs
 in a row (short scripts, malformed beats), so the job is split in two.
 Calls the brain providers in order (Groq -> Gemini -> NVIDIA -> local
@@ -29,17 +31,6 @@ import time
 import urllib.request
 import urllib.error
 
-BEAT_TYPES = ("kinetic", "chart", "stickman", "diagram", "closing")
-
-# Fields each beat type must carry in its "data" object.
-REQUIRED_DATA = {
-    "kinetic": ("eyebrow", "lines"),
-    "chart": ("title", "sub", "series"),
-    "stickman": ("object_label", "object_height", "person_height", "stretch_label"),
-    "diagram": ("title", "parts"),
-    "closing": ("lines", "sub"),
-}
-
 SCRIPT_PROMPT = '''You write short narrated explainers. Each one is a single
 continuous narration of 70 to 90 words about one surprising fact, written
 in plain spoken language, one idea per sentence, no em dashes anywhere.
@@ -57,7 +48,12 @@ Rules:
 
 
 def beats_prompt(script):
-    """Beat-planning prompt for one finished script."""
+    """Beat-planning prompt for one finished script. A beat is a story
+    unit: which sentences it covers and a short visual idea for what
+    the scene should show. There are no fixed beat types; the idea is
+    the brain's creative direction, and codegen.py turns it into the
+    actual scene code. The first beat is the hook, the last is the
+    closing."""
     n = len(split_sentences(script))
     return f'''You plan the drawn scenes for a narrated explainer. Every scene
 is drawn in code (line drawings, charts, stick figures, kinetic text). No
@@ -70,57 +66,24 @@ Return ONLY a JSON object with this exact shape:
 {{
   "beats": [
     {{
-      "type": "kinetic",
       "sentences": [0],
-      "data": {{
-        "eyebrow": "SHORT KICKER IN CAPS",
-        "lines": [{{"text": "LINE ONE", "accent": [1]}}, {{"text": "LINE TWO", "accent": []}}]
-      }}
+      "idea": "Hook: giant kinetic words build one by one, a red swoosh underlines the last word."
     }},
     {{
-      "type": "chart",
       "sentences": [1, 2],
-      "data": {{
-        "title": "CHART TITLE",
-        "sub": "what the two lines mean",
-        "caption": "one short line under the chart",
-        "series": [
-          {{"label": "first", "color": "#d9481f", "unit": "deg C",
-           "points": [{{"x": "Jan", "y": 5}}, {{"x": "Feb", "y": 6}}]}},
-          {{"label": "second", "color": "#2b5ea7", "unit": "cm",
-           "points": [{{"x": "Jan", "y": 0}}, {{"x": "Feb", "y": 1}}]}}
-        ]
-      }}
+      "idea": "A line chart of temperature rising month by month, a dot rides the line, the peak value pops in red."
     }},
     {{
-      "type": "stickman",
       "sentences": [3],
-      "data": {{
-        "object_label": "330 m",
-        "object_height": 330,
-        "person_height": 1.8,
-        "stretch_label": "+15 cm",
-        "note": "(stretch exaggerated)"
-      }}
+      "idea": "A tall shape drawn next to a small red person for scale, then it stretches a little taller."
     }},
     {{
-      "type": "diagram",
       "sentences": [4],
-      "data": {{
-        "title": "HOW IT WORKS",
-        "parts": [
-          {{"path": "M100,900 L500,900", "label": "heat in", "x": 300, "y": 860}},
-          {{"path": "M500,900 L900,600", "label": "metal grows", "x": 700, "y": 700}}
-        ]
-      }}
+      "idea": "A simple diagram: heat flows in along a path, the metal grows, each part labelled as it draws."
     }},
     {{
-      "type": "closing",
       "sentences": [5],
-      "data": {{
-        "lines": [{{"text": "NEVER THE SAME", "accent": []}}, {{"text": "HEIGHT TWICE", "accent": [1]}}],
-        "sub": "one quiet closing line"
-      }}
+      "idea": "Closing: one quiet line builds word by word, a small red sun draws itself in the corner."
     }}
   ]
 }}
@@ -128,17 +91,16 @@ Return ONLY a JSON object with this exact shape:
 Rules:
 - "sentences" are 0-based indices into the script's sentences. Every
   sentence must appear in exactly one beat, in order, with no gaps.
-- Use 4 to 6 beats. The first beat is always type "kinetic", the last
-  always type "closing". Use "chart" only when the fact has real numbers
-  that rise or fall over time. Use "stickman" when a size comparison
-  makes the fact land. Use "diagram" when a process needs showing.
-- Chart points: 6 to 12 points per series, x labels short (months or
-  plain words), y plain numbers. Both series share the same x labels.
-- Kinetic and closing lines: 2 to 3 lines, 1 to 3 words each, ALL CAPS.
-  "accent" lists the 0-based word positions to colour in red.
-- Diagram paths are SVG path strings inside a 1080x1920 frame, drawn
-  left to right, top to bottom. Keep them simple: straight lines and
-  gentle curves only.
+- Use 4 to 6 beats. The first beat is the hook: it must stop a
+  scroller, big and immediate. The last beat is the closing: quiet,
+  one clear line, the thought that lingers.
+- "idea" is one or two sentences describing what the scene shows and
+  how it moves. Be specific: name the shapes, the numbers, the
+  comparison, the motion. A different scene needs a different idea;
+  do not repeat the same visual twice in one video.
+- The idea must be drawable in code on a 1080x1920 page: lines,
+  shapes, charts, text, stick figures. No photos, no video, no
+  generated imagery.
 - No em dashes. No markdown. No text outside the JSON object.
 '''
 
@@ -167,7 +129,8 @@ def validate_script(obj):
 
 
 def validate_beats(obj, script):
-    """Check a beats-only reply against one finished script."""
+    """Check a beats-only reply against one finished script. A beat is
+    sentences + a visual idea; there are no fixed types."""
     problems = []
     if not isinstance(obj, dict):
         return ["top level is not a JSON object"]
@@ -181,14 +144,6 @@ def validate_beats(obj, script):
         if not isinstance(beat, dict):
             problems.append(f"beat {i} is not an object")
             continue
-        btype = beat.get("type")
-        if btype not in BEAT_TYPES:
-            problems.append(f"beat {i} has unknown type {btype!r}")
-            continue
-        if i == 0 and btype != "kinetic":
-            problems.append("first beat must be type 'kinetic'")
-        if i == len(beats) - 1 and btype != "closing":
-            problems.append("last beat must be type 'closing'")
         idx = beat.get("sentences")
         if not isinstance(idx, list) or not idx or not all(
             isinstance(n, int) and 0 <= n < len(sentences) for n in idx
@@ -196,29 +151,12 @@ def validate_beats(obj, script):
             problems.append(f"beat {i} has bad sentence indices {idx!r}")
             continue
         seen.extend(idx)
-        data = beat.get("data")
-        if not isinstance(data, dict):
-            problems.append(f"beat {i} is missing its data object")
+        idea = beat.get("idea")
+        if not isinstance(idea, str) or len(idea.strip()) < 10:
+            problems.append(f"beat {i} is missing a visual idea")
             continue
-        for field in REQUIRED_DATA[btype]:
-            if field not in data:
-                problems.append(f"beat {i} ({btype}) is missing data.{field}")
-        if btype == "chart":
-            series = data.get("series")
-            if not isinstance(series, list) or len(series) < 1:
-                problems.append(f"beat {i} chart needs at least one series")
-            else:
-                xs = None
-                for s in series:
-                    pts = s.get("points") if isinstance(s, dict) else None
-                    if not isinstance(pts, list) or not 4 <= len(pts) <= 12:
-                        problems.append(f"beat {i} chart series needs 4 to 12 points")
-                        break
-                    labels = [p.get("x") for p in pts]
-                    if xs is None:
-                        xs = labels
-                    elif labels != xs:
-                        problems.append(f"beat {i} chart series do not share x labels")
+        if "\u2014" in idea or "\u2013" in idea:
+            problems.append(f"beat {i} idea contains a dash character")
     if seen != sorted(seen) or sorted(seen) != list(range(len(sentences))):
         problems.append(
             f"beats must cover sentences 0..{len(sentences) - 1} exactly once, got {seen}"
@@ -232,63 +170,6 @@ def validate_output(obj):
     if problems:
         return problems
     return validate_beats(obj, obj["script"])
-    if "\u2014" in script or "\u2013" in script:
-        problems.append("script contains a dash character (use plain words)")
-    words = script.split()
-    if not 55 <= len(words) <= 110:
-        problems.append(f"script is {len(words)} words, want 55 to 110")
-    if not isinstance(beats, list) or not 3 <= len(beats) <= 7:
-        problems.append("beats must be a list of 3 to 7 items")
-        return problems
-    sentences = split_sentences(script)
-    seen = []
-    for i, beat in enumerate(beats):
-        if not isinstance(beat, dict):
-            problems.append(f"beat {i} is not an object")
-            continue
-        btype = beat.get("type")
-        if btype not in BEAT_TYPES:
-            problems.append(f"beat {i} has unknown type {btype!r}")
-            continue
-        if i == 0 and btype != "kinetic":
-            problems.append("first beat must be type 'kinetic'")
-        if i == len(beats) - 1 and btype != "closing":
-            problems.append("last beat must be type 'closing'")
-        idx = beat.get("sentences")
-        if not isinstance(idx, list) or not idx or not all(
-            isinstance(n, int) and 0 <= n < len(sentences) for n in idx
-        ):
-            problems.append(f"beat {i} has bad sentence indices {idx!r}")
-            continue
-        seen.extend(idx)
-        data = beat.get("data")
-        if not isinstance(data, dict):
-            problems.append(f"beat {i} is missing its data object")
-            continue
-        for field in REQUIRED_DATA[btype]:
-            if field not in data:
-                problems.append(f"beat {i} ({btype}) is missing data.{field}")
-        if btype == "chart":
-            series = data.get("series")
-            if not isinstance(series, list) or len(series) < 1:
-                problems.append(f"beat {i} chart needs at least one series")
-            else:
-                xs = None
-                for s in series:
-                    pts = s.get("points") if isinstance(s, dict) else None
-                    if not isinstance(pts, list) or not 4 <= len(pts) <= 12:
-                        problems.append(f"beat {i} chart series needs 4 to 12 points")
-                        break
-                    labels = [p.get("x") for p in pts]
-                    if xs is None:
-                        xs = labels
-                    elif labels != xs:
-                        problems.append(f"beat {i} chart series do not share x labels")
-    if seen != sorted(seen) or sorted(seen) != list(range(len(sentences))):
-        problems.append(
-            f"beats must cover sentences 0..{len(sentences) - 1} exactly once, got {seen}"
-        )
-    return problems
 
 
 class KeyFailure(Exception):
@@ -641,7 +522,8 @@ def main():
         sents = " ".join(
             split_sentences(obj["script"])[n] for n in beat["sentences"]
         )
-        lines.append(f"{i + 1}. [{beat['type']}] {sents}")
+        lines.append(f"{i + 1}. {sents}")
+        lines.append(f"   Idea: {beat['idea']}")
     with open(os.path.join(out_dir, "script.md"), "w") as f:
         f.write("\n".join(lines) + "\n")
     print(f"drafted with {provider}: {obj['words']} words, "

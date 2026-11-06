@@ -12,10 +12,14 @@ imagery of any kind.
 ## How one idea becomes a finished file
 
 1. An idea goes into the queue (a `queue.json` file in Drive).
-2. The brain drafts the script and the scene plan (script + scenes).
+2. The brain drafts the script, plans the scenes (one visual idea per
+   beat), and writes the scene code itself: the HTML/SVG markup and the
+   animation timeline for each beat, invented for that scene. No fixed
+   templates; different scenes get different code because the story is
+   different.
 3. You read the draft and approve it.
 4. Kokoro narrates it in one continuous take.
-5. Code draws the scenes from the scene plan.
+5. The brain-written scene code is rendered into the silent scenes.
 6. faster-whisper times every word; captions are built in 3 to 4 word
    chunks, bold white with a black outline, lower third.
 7. ffmpeg assembles the finished file: 1080x1920, 30fps, -23 LUFS,
@@ -23,6 +27,11 @@ imagery of any kind.
 8. A thumbnail is drawn in code.
 9. The finished file and thumbnail land in Drive.
 10. You watch it in Drive and post it yourself, by hand.
+
+If a render fails, the pipeline repairs itself: the brain reads the
+error, fixes the broken code (a repo file, or the scene code for the
+failing beat), and retries the render. After three consecutive repairs
+it stops and waits for a human.
 
 Steps 2 to 9 run on GitHub's machines, not yours. Your machine never
 renders anything.

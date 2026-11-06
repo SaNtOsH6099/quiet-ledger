@@ -1,13 +1,20 @@
 #!/usr/bin/env python3
-"""Draw the scenes: scenes.json data -> HyperFrames composition -> silent frames.
+"""Draw the scenes: brain-written scene code -> HyperFrames composition
+-> silent frames.
+
+The scene code comes from codegen.py (one markup + timeline per beat,
+written by the brain for that specific scene; no fixed templates).
+This script only assembles it: beat boundaries come from the whisper
+word timings, the code is slotted into templates/base.html, and
+HyperFrames checks and renders the result.
 
 Steps:
   1. Get whisper word timings for the narration (from --words, or by
      running faster-whisper here). Beat boundaries come from the words:
      a beat starts at the first word of its first sentence and ends at
      the last word of its last sentence.
-  2. Build a HyperFrames index.html from templates/base.html and one
-     component fragment per beat, with the beat data substituted in.
+  2. Build a HyperFrames index.html from templates/base.html and the
+     brain-written markup + timeline for each beat.
   3. Run `hyperframes check`, then `hyperframes render`. The render is
      silent; narration and captions join it at assembly.
   4. Write out words.json, timings.json (beat boundaries + total length)
@@ -30,10 +37,6 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 W, H = 1080, 1920
-# Plot area. x0 leaves 140px on the left so the widest y-axis label
-# (e.g. "13.2 °C", ~93px) fits without overflowing the canvas edge;
-# the labels sit right-aligned ending at x=140.
-PLOT = {"x0": 150, "x1": 970, "y_top": 450, "y_bottom": 1250}
 
 
 def split_sentences(script):
@@ -84,208 +87,44 @@ def beat_boundaries(script, beats, words):
     return bounds
 
 
-def build_chart_svg(beat_id, data):
-    """Data -> SVG markup for a two-series line chart (one series is fine).
-    Returns (svg_string, peak_labels) where peak labels are SVG text."""
-    series = data["series"]
-    n = len(series[0]["points"])
-    xs = [series[0]["points"][i]["x"] for i in range(n)]
-    x_of = lambda i: PLOT["x0"] + i * (PLOT["x1"] - PLOT["x0"]) / max(1, n - 1)
-
-    def y_of(s, v):
-        vals = [p["y"] for p in s["points"]]
-        vmin = min(0, min(vals))
-        vmax = max(vals)
-        if vmax == vmin:
-            vmax = vmin + 1
-        return PLOT["y_bottom"] - (v - vmin) / (vmax - vmin) * (
-            PLOT["y_bottom"] - PLOT["y_top"]
-        )
-
-    def ticks(s):
-        vals = [p["y"] for p in s["points"]]
-        vmin = min(0, min(vals))
-        vmax = max(vals)
-        if vmax == vmin:
-            vmax = vmin + 1
-        return [vmin + (vmax - vmin) * i / 5 for i in range(6)]
-
-    def suffix_for(unit):
-        if not unit:
-            return ""
-        if unit == "deg C":
-            return "&deg;"
-        return " " + unit
-
-    parts = []
-    # gridlines from the first series scale
-    grid = ""
-    labels_l = ""
-    for v in ticks(series[0]):
-        y = y_of(series[0], v)
-        grid += (f'<line x1="{PLOT["x0"]}" y1="{y:.0f}" '
-                 f'x2="{PLOT["x1"]}" y2="{y:.0f}" />\n')
-        lab = f"{v:g}"
-        labels_l += (f'<text x="140" y="{y + 8:.0f}" text-anchor="end">'
-                     f"{lab}{suffix_for(series[0].get('unit', ''))}</text>\n")
-    parts.append(f'<g stroke="#d8d0bf" stroke-width="2">\n{grid}</g>')
-    parts.append(f'<g class="axis-label">\n{labels_l}</g>')
-    # right axis from the second series, if any
-    if len(series) > 1:
-        labels_r = ""
-        for v in ticks(series[1]):
-            y = y_of(series[1], v)
-            lab = f"{v:g}"
-            labels_r += (f'<text x="1070" y="{y + 8:.0f}" text-anchor="end">'
-                         f"{lab}{suffix_for(series[1].get('unit', ''))}</text>\n")
-        parts.append(f'<g class="axis-label">\n{labels_r}</g>')
-    # x labels
-    xl = "".join(
-        f'<text x="{x_of(i):.0f}" y="1305">{x}</text>\n'
-        for i, x in enumerate(xs)
-    )
-    parts.append(f'<g class="month-label">\n{xl}</g>')
-    # series lines, dots, peak labels
-    for si, s in enumerate(series):
-        pts = " ".join(
-            f"{x_of(i):.0f},{y_of(s, p['y']):.0f}"
-            for i, p in enumerate(s["points"])
-        )
-        parts.append(
-            f'<polyline id="{beat_id}-line-{si}" class="series-line" '
-            f'data-dot="{beat_id}-dot-{si}" points="{pts}" '
-            f'fill="none" stroke="{s["color"]}" stroke-width="7" '
-            f'stroke-linecap="round" stroke-linejoin="round" />'
-        )
-        x0, y0 = x_of(0), y_of(s, s["points"][0]["y"])
-        parts.append(
-            f'<circle id="{beat_id}-dot-{si}" r="13" fill="{s["color"]}" '
-            f'stroke="#f6f1e7" stroke-width="4" cx="{x0:.0f}" cy="{y0:.0f}" '
-            f'opacity="0" />'
-        )
-        peak_i = max(range(n), key=lambda i: s["points"][i]["y"])
-        px, py = x_of(peak_i), y_of(s, s["points"][peak_i]["y"])
-        unit = s.get("unit", "")
-        val = s["points"][peak_i]["y"]
-        lab = f"{val:g}{suffix_for(unit)}"
-        # stagger peak labels vertically per series: when two series peak
-        # at the same point (both clamped to y=480, x=860) the labels
-        # would otherwise sit exactly on top of each other.
-        peak_y = max(py - 18, 480) + si * 60
-        parts.append(
-            f'<text id="{beat_id}-peak-{si}" class="peak-label" '
-            f'x="{min(px + 12, 860):.0f}" y="{peak_y:.0f}" '
-            f'fill="{s["color"]}" opacity="0">{lab}</text>'
-        )
-    return "\n".join(parts)
-
-
-def build_lines_html(lines, css_class, top_start, top_step):
-    """Kinetic text lines -> HTML. lines: [{text, accent: [word idx]}]."""
-    out = []
-    for li, line in enumerate(lines):
-        words = []
-        for wi, word in enumerate(line["text"].split()):
-            cls = "w red" if wi in line.get("accent", []) else "w"
-            words.append(f'<span class="{cls}">{word}</span>')
-        top = top_start + li * top_step
-        out.append(
-            f'<div class="{css_class}" style="top: {top}px;">'
-            + " ".join(words) + "</div>"
-        )
-    return "\n".join(out)
-
-
-def fill_component(template_path, subs):
-    """Load a component fragment, substitute %%KEY%% placeholders, split
-    it at the <!--TIMELINE--> marker into (markup, timeline_js)."""
-    text = open(template_path).read()
-    for key, val in subs.items():
-        text = text.replace(f"%%{key}%%", str(val))
-    if "<!--TIMELINE-->" not in text:
-        raise RuntimeError(f"{template_path} has no <!--TIMELINE--> marker")
-    markup, js = text.split("<!--TIMELINE-->", 1)
-    return markup.strip(), js.strip()
-
-
 def build_index(templates_dir, scenes, bounds, total):
+    """Assemble the HyperFrames page from the brain-written beat code.
+    No fixed templates: each beat's markup + timeline comes from
+    scenes["code"], written by codegen.py for that specific scene.
+    This only fills in the beat id, start, and duration, and slots the
+    beats into base.html."""
+    if "code" not in scenes:
+        raise RuntimeError(
+            "script.json has no 'code'; run codegen.py after draft.py")
+    if len(scenes["code"]) != len(scenes["beats"]):
+        raise RuntimeError(
+            f"code has {len(scenes['code'])} beats but the plan has "
+            f"{len(scenes['beats'])}; re-run codegen.py")
     base = open(os.path.join(templates_dir, "base.html")).read()
     beats_html, timeline_js = [], []
-    for i, (beat, (start, end)) in enumerate(zip(scenes["beats"], bounds)):
+    for i, (beat, code, (start, end)) in enumerate(
+            zip(scenes["beats"], scenes["code"], bounds)):
         beat_id = f"beat{i + 1}"
         duration = round(end - start + 0.8, 2)  # 0.4s crossfade each side
-        comp = os.path.join(
-            templates_dir, "components", f"{beat['type']}.html"
-        )
-        subs = {
-            "ID": beat_id,
-            "START": f"{max(0.0, start - 0.4):.2f}",
-            "DURATION": f"{duration:.2f}",
-            "END": f"{end:.2f}",
-        }
-        data = beat.get("data", {})
-        if beat["type"] == "kinetic":
-            subs["EYEBROW"] = data.get("eyebrow", "")
-            subs["LINES_HTML"] = build_lines_html(
-                data["lines"], "hook-line", 660, 140
-            )
-            last_top = 660 + (len(data["lines"]) - 1) * 140
-            subs["SWOOSH_PATH"] = (
-                f"M 330 {last_top + 150} C 480 {last_top + 180}, "
-                f"620 {last_top + 180}, 760 {last_top + 145}"
-            )
-        elif beat["type"] == "chart":
-            subs["TITLE"] = data.get("title", "")
-            subs["SUB"] = data.get("sub", "")
-            subs["CAPTION"] = data.get("caption", "")
-            subs["CHART_SVG"] = build_chart_svg(beat_id, data)
-        elif beat["type"] == "stickman":
-            subs["OBJECT_LABEL"] = data.get("object_label", "")
-            subs["PERSON_LABEL"] = f"{data.get('person_height', '')} m"
-            subs["STRETCH_LABEL"] = data.get("stretch_label", "")
-            subs["NOTE"] = data.get("note", "")
-            try:
-                stretch = float(
-                    "".join(
-                        c for c in str(data.get("stretch_label", "0"))
-                        if c.isdigit() or c == "."
-                    )
-                )
-                obj_h = float(data.get("object_height", 1) or 1)
-                scale = 1 + min(0.12, max(0.03, stretch / obj_h * 20))
-            except (TypeError, ValueError):
-                scale = 1.07
-            subs["STRETCH_SCALE"] = f"{scale:.3f}"
-        elif beat["type"] == "diagram":
-            subs["TITLE"] = data.get("title", "")
-            parts_svg = []
-            for pi, part in enumerate(data.get("parts", [])):
-                parts_svg.append(
-                    f'<path id="{beat_id}-part-{pi}" d="{part["path"]}" '
-                    f'fill="none" stroke="#1c1c1c" stroke-width="8" '
-                    f'stroke-linecap="round" />'
-                )
-                parts_svg.append(
-                    f'<text id="{beat_id}-label-{pi}" class="part-label" '
-                    f'x="{part["x"]}" y="{part["y"]}" opacity="0">'
-                    f"{part['label']}</text>"
-                )
-            subs["PARTS_SVG"] = "\n".join(parts_svg)
-            subs["PART_COUNT"] = str(len(data.get("parts", [])))
-        elif beat["type"] == "closing":
-            subs["LINES_HTML"] = build_lines_html(
-                data["lines"], "close-line", 780, 130
-            )
-            subs["SUB"] = data.get("sub", "")
-        markup, js = fill_component(comp, subs)
+        markup = code["markup"].replace("%%ID%%", beat_id)
+        markup = markup.replace("%%START%%", f"{max(0.0, start - 0.4):.2f}")
+        markup = markup.replace("%%DURATION%%", f"{duration:.2f}")
+        if "%%" in markup:
+            raise RuntimeError(
+                f"{beat_id} markup still has an unfilled placeholder")
+        js = code["timeline"].replace("%%ID%%", beat_id)
+        if "%%" in js:
+            raise RuntimeError(
+                f"{beat_id} timeline still has an unfilled placeholder")
         if i > 0:
             # every beat after the first starts hidden; the timeline fades it in
             markup = markup.replace('class="beat clip"',
                                     'class="beat clip" style="opacity:0;"', 1)
         beats_html.append(markup)
+        idea = beat.get("idea", "")[:60]
         timeline_js.append(
-            f"// ---- {beat_id} ({beat['type']}) "
-            f"{start:.2f}s - {end:.2f}s ----\n"
+            f"// ---- {beat_id} {start:.2f}s - {end:.2f}s "
+            f"({idea}) ----\n"
             f"var S = {start:.2f}, E = {end:.2f};\n{js}"
         )
     html = base.replace("%%BEATS%%", "\n".join(beats_html))
@@ -324,13 +163,15 @@ def main():
     bounds = beat_boundaries(scenes["script"], scenes["beats"], words)
     total = round((words[-1]["e"] if words else 0) + 0.7, 2)
     print("beat boundaries:")
-    for beat, (s, e) in zip(scenes["beats"], bounds):
-        print(f"  {beat['type']:9s} {s:6.2f} - {e:6.2f}")
+    for i, (beat, (s, e)) in enumerate(zip(scenes["beats"], bounds)):
+        idea = beat.get("idea", "")[:50]
+        print(f"  beat{i + 1} {s:6.2f} - {e:6.2f}  {idea}")
     print(f"total duration: {total:.2f}s")
     timings = {
         "total": total,
         "beats": [
-            {"type": b["type"], "start": round(s, 2), "end": round(e, 2)}
+            {"idea": b.get("idea", "")[:80], "start": round(s, 2),
+             "end": round(e, 2)}
             for b, (s, e) in zip(scenes["beats"], bounds)
         ],
     }

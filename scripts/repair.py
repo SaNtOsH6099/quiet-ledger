@@ -126,6 +126,26 @@ def repair(error, repo):
     return obj["file"], obj["content"], obj.get("summary", ""), provider
 
 
+# Markers that the failure is in the brain-written scene code (stored in
+# the queue entry), not in a repo file. A HyperFrames check failure
+# means the code for one beat is bad; patching a repo file cannot fix
+# it. The repair job regenerates the scene code instead.
+SCENE_CODE_MARKERS = (
+    "hyperframes check",
+    "text_box_overflow",
+    "content_overlap",
+    "caption_exit_missing_hard_kill",
+    "Layout",
+    "missing_hard_kill",
+)
+
+
+def is_scene_code_error(error):
+    """True when the error is a bad brain-written scene, not a repo bug."""
+    low = error.lower()
+    return any(m.lower() in low for m in SCENE_CODE_MARKERS)
+
+
 def main():
     parser = argparse.ArgumentParser(description="self-repair via the brain")
     parser.add_argument("--error", default=None, help="error text")
@@ -146,6 +166,12 @@ def main():
     if not error.strip():
         print("error text is empty", file=sys.stderr)
         return 2
+    if is_scene_code_error(error):
+        # The scene code (in the queue entry) is bad; no repo file can
+        # fix it. Exit 3 so the workflow regenerates the code instead.
+        print("the failure is in the brain-written scene code, not a "
+              "repo file; regenerate the code", file=sys.stderr)
+        return 3
     path, content, summary, provider = repair(error.strip(), args.repo)
     print(f"brain ({provider}) will fix {path}: {summary}", flush=True)
     if args.dry_run:
