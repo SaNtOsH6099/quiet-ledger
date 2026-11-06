@@ -48,6 +48,63 @@ def collect_files(repo):
     return out
 
 
+def _error_mentions(path, error):
+    """True when the error text names this file (by path or by
+    basename). The error usually contains the failing file's path."""
+    low = error.lower()
+    base = os.path.basename(path).lower()
+    return path.lower() in low or base in low
+
+
+def _file_index(files):
+    """A compact index of every repairable file: path + first line +
+    size. The brain sees what exists without the full contents."""
+    lines = []
+    for path in sorted(files):
+        content = files[path]
+        first = content.splitlines()[0][:80] if content.splitlines() else ""
+        lines.append(f"{path} ({len(content)} chars) :: {first}")
+    return "\n".join(lines)
+
+
+def select_files_for_error(error, files, max_chars=6000):
+    """Pick the files the brain needs for this error, and return
+    (selected, index). The full prompt used to be ~38k tokens because
+    every file was sent in full; Groq's free tier is 8000 TPM, so the
+    repair leg could never run on Groq. Now: files named in the error
+    go in full (capped), everything else appears only in the compact
+    index, so the prompt stays small and the brain still knows what
+    exists and can ask for a file by name if it needs one."""
+    named = [p for p in files if _error_mentions(p, error)]
+    if not named:
+        # No file named in the error: fall back to the most likely
+        # suspects by keyword, so the brain still gets something real.
+        keywords = {
+            "hyperframes": "pipeline/render/render.py",
+            "render": "pipeline/render/render.py",
+            "drive": "pipeline/drive/drive_queue.py",
+            "queue": "pipeline/drive/drive_queue.py",
+            "voice": "pipeline/render/voice.py",
+            "caption": "pipeline/render/captions.py",
+            "thumbnail": "pipeline/render/thumbnail.py",
+            "assemble": "pipeline/render/assemble.py",
+            "codegen": "pipeline/brain/codegen.py",
+            "draft": "pipeline/brain/draft.py",
+            "provider": "pipeline/brain/providers.py",
+            "guardrail": "pipeline/guardrails/rules.py",
+            "css": "pipeline/guardrails/css_check.py",
+        }
+        low = error.lower()
+        for kw, path in keywords.items():
+            if kw in low and path in files:
+                named.append(path)
+                break
+    selected = {}
+    for path in named:
+        selected[path] = files[path][:max_chars]
+    return selected, _file_index(files)
+
+
 REPAIR_SYSTEM = """You fix broken code in a small video pipeline. You are given
 an error message and the contents of the pipeline's code files. Diagnose
 which ONE file is wrong and return the corrected FULL content of that file.
@@ -66,18 +123,18 @@ Rules:
 
 
 def repair_prompt(error, files):
-    listing = "\n".join(f"--- {path} ---" for path in files)
+    selected, index = select_files_for_error(error, files)
     bodies = []
-    for path, content in files.items():
-        # Cap each file so the prompt stays within the model's budget.
-        # The pipeline's files are small; 12k chars each is plenty.
-        bodies.append(f"--- {path} ---\n{content[:12000]}")
-    return (
+    for path, content in selected.items():
+        bodies.append(f"--- {path} ---\n{content}")
+    full = (
         f"Error:\n{error}\n\n"
-        f"Files:\n{listing}\n\n"
+        f"Files (full contents of the files the error names):\n"
         + "\n\n".join(bodies)
-        + "\n\nReturn the JSON object with the fixed file."
+        + f"\n\nAll repairable files (index only):\n{index}\n\n"
+        + "Return the JSON object with the fixed file."
     )
+    return full
 
 
 def validate_repair(obj, files):
@@ -117,10 +174,14 @@ def repair(error, repo):
     files = collect_files(repo)
     if not files:
         raise RuntimeError("no repairable files found")
+    selected, _index = select_files_for_error(error, files)
+    # Validate against the files the brain actually saw in full, so it
+    # cannot "fix" a file it only saw as one index line.
+    seen = selected if selected else files
     obj, provider = generate(
         REPAIR_SYSTEM,
         repair_prompt(error, files),
-        lambda o: validate_repair(o, files),
+        lambda o: validate_repair(o, seen),
         "repair",
     )
     return obj["file"], obj["content"], obj.get("summary", ""), provider

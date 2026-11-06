@@ -217,12 +217,22 @@ def main():
     env = dict(os.environ)
     env["TMPDIR"] = os.path.abspath(os.path.join(args.work_dir, "..", "tmp"))
     os.makedirs(env["TMPDIR"], exist_ok=True)
+    # HyperFrames check + render get a hard timeout each: a hung render
+    # used to sit forever (the scenes job has a 360 min job timeout,
+    # but the step itself never gave up). 20 min is far above a normal
+    # render for a 30-60s short.
     for cmd in (
         ["npx", "--yes", "hyperframes@0.8.188", "check"],
         ["npx", "--yes", "hyperframes@0.8.188", "render"],
     ):
         print("+ " + " ".join(cmd), flush=True)
-        subprocess.run(cmd, cwd=args.work_dir, env=env, check=True)
+        try:
+            subprocess.run(cmd, cwd=args.work_dir, env=env, check=True,
+                           timeout=1200)
+        except subprocess.TimeoutExpired:
+            raise RuntimeError(
+                f"hyperframes {' '.join(cmd[3:])} timed out after 20 min; "
+                "the render hung instead of finishing")
 
     renders = sorted(
         glob.glob(os.path.join(args.work_dir, "renders", "*.mp4")),
