@@ -56,7 +56,19 @@ def design_system(fmt):
         "You write the drawn scene for one beat of a narrated\n"
         "explainer. Every scene is drawn in code (line drawings, charts, stick\n"
         "figures, kinetic text, diagrams). No photos, no generated imagery.\n"
-        "Invent the visual approach that best serves THIS scene.\n"
+        "You work on ONE beat at a time, so make it detailed. A single line\n"
+        "and a circle is not a scene. Invent a rich visual that best serves\n"
+        "THIS scene.\n"
+        "\n"
+        "DETAIL: every beat must be a finished illustration, not a sketch.\n"
+        "Fill the frame. Build in layers: a background layer (a subtle\n"
+        "pattern, a horizon, a grid, a texture), a middle layer (the main\n"
+        "subject, drawn with care), and a foreground layer (labels, accents,\n"
+        "small details). Use at least 4 distinct drawn elements and at\n"
+        "least 3 separate animations, staggered through the beat. The scene\n"
+        "must be alive for the whole beat: something draws on, something\n"
+        "moves, something appears. Never leave the frame mostly empty, and\n"
+        "never leave a beat with only one moving part.\n"
         "\n"
         + g["prompt"]
         + "\nCANVAS AND LOOK:\n"
@@ -113,13 +125,31 @@ STRUCTURE:
 - Do not reference an id you did not define. All ids start with %%ID%%-.
 - No <script> tag in markup. No <!--TIMELINE--> marker.
 
-EXAMPLE (kinetic hook; copy the pattern, invent the content):
+EXAMPLE (a rich kinetic hook; copy the LAYERING and the density, invent the content):
+This beat has 3 layers and 5 animations. The background is a faint dotted
+grid; the middle is the tower silhouette plus a sun; the foreground is the
+hook text, a red swoosh, and a small label. The frame is full. Copy this
+density, not the minimal version.
+
 markup:
 <div id="%%ID%%" class="beat clip" data-start="%%START%%" data-duration="%%DURATION%%" data-track-index="1">
   <div class="eyebrow" style="top: 470px;">A SURPRISING FACT</div>
-  <div class="hook-line" style="top: 660px;"><span class="w">WHY</span> <span class="w red">TALLER?</span></div>
+  <div class="hook-line" style="top: 620px;"><span class="w">WHY</span> <span class="w red">TALLER?</span></div>
+  <div class="hook-line" style="top: 780px;"><span class="w">EVERY</span> <span class="w">SUMMER</span></div>
   <svg width="1080" height="1920" style="position:absolute;inset:0;overflow:visible;">
-    <path id="%%ID%%-swoosh" d="M 330 810 C 480 840, 620 840, 760 805" fill="none" stroke="#d9481f" stroke-width="10" stroke-linecap="round" opacity="0" />
+    <g id="%%ID%%-grid" opacity="0">
+      <line x1="140" y1="1000" x2="940" y2="1000" stroke="#1c1c1c" stroke-width="2" stroke-dasharray="2 14" opacity="0.25" />
+      <line x1="140" y1="1150" x2="940" y2="1150" stroke="#1c1c1c" stroke-width="2" stroke-dasharray="2 14" opacity="0.25" />
+      <line x1="140" y1="1300" x2="940" y2="1300" stroke="#1c1c1c" stroke-width="2" stroke-dasharray="2 14" opacity="0.25" />
+    </g>
+    <g id="%%ID%%-tower" opacity="0">
+      <path d="M 470 1500 L 540 1000 L 610 1500 Z" fill="none" stroke="#1c1c1c" stroke-width="8" />
+      <path d="M 500 1300 L 580 1300" stroke="#1c1c1c" stroke-width="6" />
+      <path d="M 515 1150 L 565 1150" stroke="#1c1c1c" stroke-width="6" />
+    </g>
+    <circle id="%%ID%%-sun" cx="830" cy="1050" r="70" fill="none" stroke="#d9481f" stroke-width="10" opacity="0" />
+    <path id="%%ID%%-swoosh" d="M 330 920 C 480 950, 620 950, 760 915" fill="none" stroke="#d9481f" stroke-width="10" stroke-linecap="round" opacity="0" />
+    <text id="%%ID%%-label" x="540" y="1620" text-anchor="middle" class="note" opacity="0">grows about 15 cm every summer</text>
   </svg>
 </div>
 timeline:
@@ -128,8 +158,14 @@ tl.fromTo("#%%ID%% .eyebrow", { opacity: 0, y: 14 }, { opacity: 1, y: 0, duratio
 document.querySelectorAll("#%%ID%% .hook-line").forEach(function (line, li) {
   tl.fromTo(line.querySelectorAll(".w"), { x: 70, opacity: 0 }, { x: 0, opacity: 1, duration: 0.32, stagger: 0.11 }, S + 0.25 + li * 0.5);
 });
+tl.fromTo("#%%ID%%-grid", { opacity: 0 }, { opacity: 1, duration: 0.8 }, S + 0.6);
+var towerLen = prepDraw(document.querySelector("#%%ID%%-tower path"));
+tl.fromTo("#%%ID%%-tower", { opacity: 0 }, { opacity: 1, duration: 0.3 }, S + 1.0);
+tl.fromTo("#%%ID%%-tower path", { strokeDashoffset: towerLen }, { strokeDashoffset: 0, duration: 1.2, ease: "power2.inOut", stagger: 0.15 }, S + 1.0);
+tl.fromTo("#%%ID%%-sun", { opacity: 0, scale: 0.6, transformOrigin: "830px 1050px" }, { opacity: 1, scale: 1, duration: 0.7, ease: "power3.out" }, S + 1.6);
 var swooshLen = prepDraw(document.getElementById("%%ID%%-swoosh"));
-tl.fromTo("#%%ID%%-swoosh", { strokeDashoffset: swooshLen, opacity: 0 }, { strokeDashoffset: 0, opacity: 1, duration: 0.5, ease: "power2.inOut" }, S + 1.9);
+tl.fromTo("#%%ID%%-swoosh", { strokeDashoffset: swooshLen, opacity: 0 }, { strokeDashoffset: 0, opacity: 1, duration: 0.5, ease: "power2.inOut" }, S + 2.1);
+tl.fromTo("#%%ID%%-label", { opacity: 0, y: 12 }, { opacity: 1, y: 0, duration: 0.5 }, S + 2.4);
 """
 
 # The exit every beat gets, appended mechanically (see module docstring).
