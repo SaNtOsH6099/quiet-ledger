@@ -216,20 +216,20 @@ def call_local(_key, system, user):
 # Keys are tried in order within a provider; a 429 or auth error moves to
 # the next key, any other failure moves to the next provider.
 PROVIDERS = [
-    ("groq", "GROQ_API_KEYS", call_groq),
     ("gemini", "GEMINI_API_KEYS", call_gemini),
     ("nvidia", "NVIDIA_API_KEYS", call_nvidia),
+    ("groq", "GROQ_API_KEYS", call_groq),
     ("local", None, call_local),
 ]
 
 # Codegen (writing scene code) is the most demanding task, so it tries
 # the most capable model first: the Nemotron 550B on NVIDIA NIM, which
-# replies (tested 2026-11-06). Falls back to Groq, then Gemini, then
-# the local lifeboat, same as the default order.
+# replies (tested 2026-11-06). Falls back to Gemini, then Groq last
+# (tightest free-tier TPM), then the local lifeboat.
 PROVIDERS_CODEGEN = [
     ("nvidia", "NVIDIA_API_KEYS", call_nvidia),
-    ("groq", "GROQ_API_KEYS", call_groq),
     ("gemini", "GEMINI_API_KEYS", call_gemini),
+    ("groq", "GROQ_API_KEYS", call_groq),
     ("local", None, call_local),
 ]
 
