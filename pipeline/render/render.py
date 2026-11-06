@@ -153,6 +153,25 @@ def main():
     os.makedirs(args.work_dir, exist_ok=True)
     scenes = json.load(open(args.scenes))
 
+    # Safety net: never render stale or invalid scene code. The voice
+    # job runs codegen --check first, so this should already be fresh;
+    # if it is not (for example a manual render, or a check that was
+    # skipped), fail loudly instead of silently replaying broken code
+    # (the failure that shipped entry 3's clipped hook and missing
+    # closing text twice). Exit 3 means "regenerate the code".
+    from pipeline.brain.codegen import stored_code_is_fresh  # noqa: PLC0415
+
+    fmt = scenes.get("format", "shorts")
+    problems = stored_code_is_fresh(scenes, fmt)
+    if problems:
+        print("stored scene code is stale or invalid; refusing to render:",
+              file=sys.stderr)
+        for p in problems:
+            print(f"  - {p}", file=sys.stderr)
+        print("run: python3 -m pipeline.brain.codegen script.json out "
+              "--check", file=sys.stderr)
+        return 3
+
     if args.words:
         words = json.load(open(args.words))
     else:

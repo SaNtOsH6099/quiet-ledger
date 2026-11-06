@@ -5,6 +5,33 @@ input from a file and writes its output to a file. The handoff between
 stages is the file, never shared memory. If a stage fails, the repair
 job fixes it and re-triggers the render.
 
+## One video, one environment
+
+Every video is an entirely separate environment: one Drive folder,
+"NNN - slug", that holds EVERYTHING for that video. The folder is the
+video; deleting it deletes the video completely.
+
+    NNN - slug/
+      script.json         — the script: beats, scene code, codegen
+                            version, provider, format.
+      meta.json           — status, topic, timestamps, provider,
+                            codegen version, drive links.
+      narration.wav       — the narration (kept so re-assembly does
+                            not need to re-narrate).
+      words.json          — word timings for captions.
+      captions.ass        — the caption file.
+      silent.mp4          — the rendered scenes, no audio.
+      NNN - slug.mp4      — the finished video.
+      NNN - slug-thumb.png — the thumbnail.
+
+`queue.json` in the Drive root is only a THIN INDEX: one entry per
+video with {id, topic, status, folder_id, drive_link}. It points at
+the video's folder; it does not hold the script. `pipeline.drive.
+video_env` is the only module that touches a video's folder;
+`pipeline.drive.drive_queue` only touches queue.json. An old-format
+entry (script embedded in queue.json, no folder) is migrated into
+its own folder automatically the first time it is rendered.
+
 ## Stages, in order
 
 | # | Stage | Module | Reads | Writes |
@@ -17,7 +44,25 @@ job fixes it and re-triggers the render.
 | 6 | Captions | `pipeline.render.captions` | `words.json` + `script.json` | `captions.ass` |
 | 7 | Assemble | `pipeline.render.assemble` | `silent.mp4` + `narration.wav` + `captions.ass` | `final.mp4` |
 | 8 | Thumbnail | `pipeline.render.thumbnail` | `script.json` | `thumbnail.png` |
-| 9 | Upload | `pipeline.drive.upload_drive` | `final.mp4` + `thumbnail.png` | Drive folder + queue entry marked `in-drive` |
+| 9 | Upload | `pipeline.drive.upload_drive` | `final.mp4` + `thumbnail.png` + build files | video's folder + queue entry marked `in-drive` |
+
+## Scene-code freshness: the codegen version
+
+`pipeline.brain.codegen` stamps `codegen_version` (and
+`code_provider`) into script.json when it writes the code. Bump
+`CODEGEN_VERSION` in codegen.py whenever the prompt, the design
+system, or the validation rules change in a way that makes older
+scene code unreliable.
+
+Before narrating, the render job runs `codegen --check`: it re-validates
+the stored code (same validation the brain's output must pass,
+including the CSS check that measures real text widths) and regenerates
+it only when it is stale (older version) or invalid. A fresh script
+passes through untouched, with no brain calls. The scenes job also
+refuses to render stale code (exit 3 = regenerate). This is what stops
+a re-render from silently replaying old broken code: entry 3's clipped
+hook and missing closing text shipped twice because the render trusted
+the stored code blindly, and the new checks never ran on it.
 
 ## The brain
 
@@ -25,10 +70,11 @@ job fixes it and re-triggers the render.
 call (draft, codegen, repair) goes through `generate()` there, so the
 rotation lives in exactly one place.
 
-- Default order (draft, repair): Groq -> Gemini -> NVIDIA -> local.
+- Default order (draft, repair): Gemini -> NVIDIA -> Groq -> local.
 - Codegen order (writing scene code is the most demanding task):
-  NVIDIA -> Groq -> Gemini -> local. The NVIDIA leg tries the Nemotron
-  550B first (tested 2026-11-06: it replies), then the 30B.
+  NVIDIA -> Gemini -> Groq -> local. The NVIDIA leg tries the Nemotron
+  550B first (tested 2026-11-06: it replies), then the 30B. Groq is
+  LAST in both orders (its free TPM is only 8000, the tightest).
 - Keys come from the environment (GitHub Secrets), never from files.
   Groq key 2 of 4 is INVALID (401); 3 working keys remain. Groq free
   TPM is 8000/min, so codegen prompts are kept short.

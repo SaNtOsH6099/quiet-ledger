@@ -1,11 +1,16 @@
 #!/usr/bin/env python3
-"""The queue: one queue.json file in Google Drive, the single source of truth.
+"""The queue: one queue.json file in Google Drive, the thin index.
 
-Entries: {"id", "topic", "status", "script", "scenes", "drive_link"}
-Status flow: idea -> script-ready -> approved -> rendering -> in-drive -> posted
-The control app edits this file later; the jobs read it through the same
-service account. If Drive is not configured, every command fails with a
-clear message and the caller falls back to a manual topic.
+queue.json is ONLY an index now, one entry per video:
+    {"id", "topic", "status", "folder_id", "drive_link"}
+It points at the video's own environment folder (see
+pipeline/drive/video_env.py). It does NOT hold the script. The
+script, the narration, the scenes and the finished files all live in
+the video's folder, so each video is entirely separate and deleting
+a video's folder deletes the video completely. The control app edits
+this file later; the jobs read it through the same service account.
+If Drive is not configured, every command fails with a clear message
+and the caller falls back to a manual topic.
 
 Auth: DRIVE_SERVICE_ACCOUNT_JSON env var holds the service account JSON
 text, or --key-file points at the JSON file. DRIVE_FOLDER_ID env var (or
@@ -167,8 +172,7 @@ def cmd_add(args):
         "id": new_id,
         "topic": args.topic,
         "status": "idea",
-        "script": None,
-        "scenes": None,
+        "folder_id": None,
         "drive_link": None,
     }
     queue.setdefault("entries", []).append(entry)
@@ -184,12 +188,14 @@ def cmd_update(args):
         if entry.get("id") == args.id:
             if args.status:
                 entry["status"] = args.status
-            if args.script_file:
-                entry["script"] = json.load(open(args.script_file))
-            if args.scenes_file:
-                entry["scenes"] = json.load(open(args.scenes_file))
+            if args.folder_id_entry:
+                entry["folder_id"] = args.folder_id_entry
             if args.link:
                 entry["drive_link"] = args.link
+            # Drop any legacy script blob if this entry still carries
+            # one: the script lives in the video's own folder now.
+            entry.pop("script", None)
+            entry.pop("scenes", None)
             save_queue(service, args.folder_id, queue, file_id)
             print(json.dumps(entry))
             return 0
@@ -215,8 +221,8 @@ def main():
     p = sub.add_parser("update", help="update one entry")
     p.add_argument("--id", type=int, required=True)
     p.add_argument("--status", default=None)
-    p.add_argument("--script-file", default=None)
-    p.add_argument("--scenes-file", default=None)
+    p.add_argument("--folder-id-entry", default=None,
+                   help="Drive id of the video's own environment folder")
     p.add_argument("--link", default=None)
     p.set_defaults(fn=cmd_update)
     args = parser.parse_args()

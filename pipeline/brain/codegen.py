@@ -48,6 +48,16 @@ from pipeline.brain.providers import (
 from pipeline.guardrails import rules as guardrails
 from pipeline.guardrails import css_check
 
+# The codegen version. Bump this whenever the prompt, the design
+# system, or the validation rules change in a way that makes older
+# scene code unreliable. The version is stamped into script.json
+# when the code is written; the render job regenerates the code when
+# the stored version is older than this one, so an improved codegen
+# automatically refreshes old videos instead of replaying their
+# broken code (the failure that shipped entry 3's clipped hook and
+# missing closing text twice).
+CODEGEN_VERSION = 1
+
 
 def design_system(fmt):
     """The code-writing prompt: the shared design language plus the
@@ -354,6 +364,7 @@ def codegen(script_obj, fmt="shorts"):
     script = script_obj["script"]
     beats = script_obj["beats"]
     code = []
+    providers = []
     for i, beat in enumerate(beats):
         beat_no = i + 1
         est = estimate_seconds(beat, script)
@@ -374,17 +385,78 @@ def codegen(script_obj, fmt="shorts"):
         )
         timeline = append_exit(obj["timeline"])
         code.append({"markup": obj["markup"], "timeline": timeline})
+        providers.append(provider)
         print(f"  beat {beat_no} code written via {provider}", flush=True)
+    # Stamp the version and the provider on the script, so the render
+    # job can tell whether this code is current or stale.
+    script_obj["codegen_version"] = CODEGEN_VERSION
+    script_obj["code_provider"] = (
+        providers[0] if len(set(providers)) == 1 else "mixed")
     return code
+
+
+def stored_code_is_fresh(script_obj, fmt="shorts"):
+    """Check whether the scene code already stored in a script is
+    current and valid, without calling the brain. Returns a list of
+    problems (empty means fresh). A missing or older codegen version
+    is a problem, and so is any beat whose stored code fails the same
+    validation the brain's output must pass (including the CSS check
+    that measures real text widths)."""
+    problems = []
+    stored = script_obj.get("codegen_version", 0)
+    if stored < CODEGEN_VERSION:
+        problems.append(
+            f"scene code is version {stored}, current is "
+            f"{CODEGEN_VERSION}; the codegen rules have changed since "
+            "this code was written")
+    code = script_obj.get("code")
+    if not code:
+        problems.append("script has no scene code")
+        return problems
+    beats = script_obj.get("beats", [])
+    if len(code) != len(beats):
+        problems.append(
+            f"scene code has {len(code)} beats but the script has "
+            f"{len(beats)}")
+        return problems
+    for i, entry in enumerate(code):
+        beat_problems = validate_code(entry, fmt)
+        if beat_problems:
+            problems.append(
+                f"beat {i + 1} stored code fails validation: "
+                + "; ".join(beat_problems))
+    return problems
+
+
+def refresh_code(script_obj, fmt="shorts"):
+    """Regenerate the scene code if the stored code is stale or
+    invalid. Returns True when the code was regenerated, False when
+    the stored code was already fresh. This is what the render job
+    runs before narrating, so a video whose code predates a codegen
+    improvement gets new code instead of replaying the old broken
+    code."""
+    problems = stored_code_is_fresh(script_obj, fmt)
+    if not problems:
+        print("stored scene code is fresh "
+              f"(version {script_obj.get('codegen_version')}); "
+              "keeping it", flush=True)
+        return False
+    print("stored scene code is stale:", flush=True)
+    for p in problems:
+        print(f"  - {p}", flush=True)
+    print("regenerating the scene code", flush=True)
+    script_obj["code"] = codegen(script_obj, fmt)
+    return True
 
 
 def main():
     if len(sys.argv) < 3:
-        print("usage: codegen.py SCRIPT_JSON OUT_DIR [--regen] [--format shorts|longform]",
+        print("usage: codegen.py SCRIPT_JSON OUT_DIR [--regen] [--check] [--format shorts|longform]",
               file=sys.stderr)
         return 2
     script_path, out_dir = sys.argv[1], sys.argv[2]
     regen = "--regen" in sys.argv[3:]
+    check = "--check" in sys.argv[3:]
     fmt = "shorts"
     for a in sys.argv[3:]:
         if a.startswith("--format="):
@@ -397,6 +469,15 @@ def main():
               file=sys.stderr)
         return 2
     fmt = script_obj.get("format", fmt)
+    if check:
+        # Refresh only if the stored code is stale or invalid; a
+        # fresh script passes through untouched (no brain calls).
+        refreshed = refresh_code(script_obj, fmt)
+        with open(os.path.join(out_dir, "script.json"), "w") as f:
+            json.dump(script_obj, f, indent=2)
+        print("scene code refreshed" if refreshed
+              else "scene code already fresh")
+        return 0
     code = codegen(script_obj, fmt)
     script_obj["code"] = code
     script_obj["format"] = fmt

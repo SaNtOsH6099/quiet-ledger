@@ -113,7 +113,7 @@ jobs:
           path: out/
           if-no-files-found: error
           retention-days: 7
-      - name: save the draft in the queue as script-ready
+      - name: save the draft in the video's own environment folder
         env:
           DRIVE_OAUTH_JSON: ${{ secrets.DRIVE_OAUTH_JSON }}
           DRIVE_SERVICE_ACCOUNT_JSON: ${{ secrets.DRIVE_SERVICE_ACCOUNT_JSON }}
@@ -124,7 +124,20 @@ jobs:
           else
             ID=$(python3 -m pipeline.drive.drive_queue add --topic "${{ steps.topic.outputs.topic }}" | python3 -c "import json,sys; print(json.load(sys.stdin)['id'])")
           fi
-          python3 -m pipeline.drive.drive_queue update --id "$ID" --status script-ready --script-file out/script.json
+          # The video's environment folder holds the script; queue.json
+          # only indexes it (id, topic, status, folder_id, link).
+          FOLDER_ID=$(python3 - <<PY
+          import json, os, sys
+          sys.path.insert(0, ".")
+          from pipeline.drive import drive_queue as q
+          from pipeline.drive import video_env as env
+          service = env.drive_service()
+          script = json.load(open("out/script.json"))
+          folder_id = env.create_env(service, os.environ.get("DRIVE_FOLDER_ID"), $ID, "${{ steps.topic.outputs.topic }}", script=script)
+          print(folder_id)
+          PY
+          )
+          python3 -m pipeline.drive.drive_queue update --id "$ID" --status script-ready --folder-id-entry "$FOLDER_ID"
           echo "queue_id=$ID" >> "$GITHUB_OUTPUT"
 
   voice:
@@ -141,11 +154,14 @@ jobs:
         run: python3 -m pipeline.tools.check_no_shadow
       - name: install Drive tools
         run: python3 -m pip install -q -r requirements/drive.txt
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
       - name: install speech tools
         run: |
           sudo apt-get update -qq && sudo apt-get install -y -qq espeak-ng
           python3 -m pip install -q -r requirements/voice.txt
-      - name: fetch the approved entry
+      - name: fetch the approved entry's script from its own folder
         id: entry
         env:
           QUEUE_ID_INPUT: ${{ inputs.queue_id }}
@@ -155,6 +171,7 @@ jobs:
         run: |
           python3 - <<'PY'
           import json, os, subprocess, sys
+          sys.path.insert(0, ".")
           qid = os.environ.get("QUEUE_ID_INPUT", "").strip()
           cmd = [sys.executable, "-m", "pipeline.drive.drive_queue"]
           cmd += ["get", "--id", qid] if qid else ["next", "--status", "approved"]
@@ -167,17 +184,59 @@ jobs:
               print(r.stderr, file=sys.stderr)
               sys.exit(1)
           entry = json.loads(r.stdout)
-          if not entry.get("script"):
-              print(f"queue entry {entry['id']} is approved but has no "
-                    "script; run the draft stage first", file=sys.stderr)
+          # The script lives in the video's own environment folder, not
+          # in queue.json. An old-format entry (script embedded, no
+          # folder) is migrated into its own folder here.
+          from pipeline.drive import drive_queue as q
+          from pipeline.drive import video_env as env
+          service = env.drive_service()
+          root = os.environ.get("DRIVE_FOLDER_ID")
+          folder_id = entry.get("folder_id")
+          if not folder_id:
+              folder_id = env.migrate_entry(service, root, entry)
+              qid_int = entry["id"]
+              subprocess.run([sys.executable, "-m", "pipeline.drive.drive_queue",
+                              "update", "--id", str(qid_int),
+                              "--folder-id-entry", folder_id], check=True)
+              print(f"migrated queue entry {qid_int} into its own folder")
+          script = env.load_script(service, folder_id)
+          if not script:
+              print(f"video folder {folder_id} has no script.json; "
+                    "run the draft stage first", file=sys.stderr)
               sys.exit(1)
           os.makedirs("out", exist_ok=True)
           with open("out/script.json", "w") as f:
-              json.dump(entry["script"], f, indent=2)
-          meta = {"queue_id": entry["id"], "topic": entry["topic"]}
+              json.dump(script, f, indent=2)
+          meta = {"queue_id": entry["id"], "topic": entry["topic"],
+                  "folder_id": folder_id}
           with open("out/meta.json", "w") as f:
               json.dump(meta, f, indent=2)
           print(f"rendering entry {entry['id']}: {entry['topic']}")
+          PY
+      - name: refresh the scene code if it is stale
+        env:
+          GROQ_API_KEYS: ${{ secrets.GROQ_API_KEYS }}
+          GEMINI_API_KEYS: ${{ secrets.GEMINI_API_KEYS }}
+          NVIDIA_API_KEYS: ${{ secrets.NVIDIA_API_KEYS }}
+          DRIVE_OAUTH_JSON: ${{ secrets.DRIVE_OAUTH_JSON }}
+          DRIVE_SERVICE_ACCOUNT_JSON: ${{ secrets.DRIVE_SERVICE_ACCOUNT_JSON }}
+          DRIVE_FOLDER_ID: ${{ secrets.DRIVE_FOLDER_ID }}
+        run: |
+          # codegen --check regenerates the scene code only when the
+          # stored code is stale (older version) or fails validation;
+          # a fresh script passes through untouched (no brain calls).
+          # This is what stops a re-render from replaying old broken
+          # code (entry 3's clipped hook and missing closing text).
+          python3 -m pipeline.brain.codegen out/script.json out --check --format=${{ inputs.format }}
+          python3 - <<'PY'
+          import json, os, sys
+          sys.path.insert(0, ".")
+          from pipeline.drive import video_env as env
+          meta = json.load(open("out/meta.json"))
+          service = env.drive_service()
+          script = json.load(open("out/script.json"))
+          env.save_script(service, meta["folder_id"], script)
+          print("script.json saved back to the video's folder")
           PY
       - name: mark the entry rendering
         env:
@@ -323,6 +382,18 @@ jobs:
         run: python3 -m pip install -q -r requirements/drive.txt
       - uses: actions/download-artifact@v4
         with:
+          name: voice
+          path: out/
+      - uses: actions/download-artifact@v4
+        with:
+          name: scenes
+          path: out/
+      - uses: actions/download-artifact@v4
+        with:
+          name: captions
+          path: out/
+      - uses: actions/download-artifact@v4
+        with:
           name: final
           path: out/
       - uses: actions/download-artifact@v4
@@ -337,7 +408,10 @@ jobs:
         run: |
           ID=$(python3 -c "import json; print(json.load(open('out/meta.json'))['queue_id'])")
           TOPIC=$(python3 -c "import json; print(json.load(open('out/meta.json'))['topic'])")
-          python3 -m pipeline.drive.upload_drive --file out/final.mp4 --thumbnail out/thumbnail.png --queue-id "$ID" --topic "$TOPIC"
+          # File everything into the video's own environment folder, so
+          # the folder is the whole video and can be re-assembled from
+          # it alone.
+          python3 -m pipeline.drive.upload_drive --file out/final.mp4 --thumbnail out/thumbnail.png --script out/script.json --narration out/narration.wav --words out/words.json --captions out/captions.ass --silent out/silent.mp4 --queue-id "$ID" --topic "$TOPIC"
 
   repair:
     name: repair the code with the brain
@@ -395,15 +469,39 @@ jobs:
             fi
             if [ -z "$QID" ]; then echo "could not determine queue entry"; exit 1; fi
             echo "queue_id=$QID" >> "$GITHUB_OUTPUT"
-            python3 -m pipeline.drive.drive_queue get --id "$QID" > /tmp/entry.json
-            python3 -c "import json; e=json.load(open('/tmp/entry.json')); json.dump(e['script'], open('/tmp/script.json','w'), indent=2)"
+            # The script lives in the video's own environment folder, not
+            # in queue.json. Fetch it from there, regenerate, save back.
+            python3 - <<PY
+            import json, os, sys
+            sys.path.insert(0, ".")
+            from pipeline.drive import drive_queue as q
+            from pipeline.drive import video_env as env
+            service = env.drive_service()
+            queue, _ = q.load_queue(service, os.environ.get("DRIVE_FOLDER_ID"))
+            entry = next(e for e in queue["entries"] if e["id"] == $QID)
+            folder_id = entry.get("folder_id")
+            if not folder_id:
+                folder_id = env.migrate_entry(service, os.environ.get("DRIVE_FOLDER_ID"), entry)
+            script = env.load_script(service, folder_id)
+            json.dump(script, open("/tmp/script.json", "w"), indent=2)
+            json.dump({"folder_id": folder_id}, open("/tmp/env.json", "w"))
+            PY
             python3 -m pipeline.brain.codegen /tmp/script.json /tmp/codeout --regen
             REGEN=$(python3 -c "import json; print(json.load(open('/tmp/codeout/script.json')).get('code_regen_count', 0))")
             if [ "$REGEN" -gt 3 ]; then
               echo "scene code regenerated $REGEN times and still failing; a human needs to look"
               exit 1
             fi
-            python3 -m pipeline.drive.drive_queue update --id "$QID" --status rendering --script-file /tmp/codeout/script.json
+            python3 - <<'PY'
+            import json, os, sys
+            sys.path.insert(0, ".")
+            from pipeline.drive import video_env as env
+            service = env.drive_service()
+            folder_id = json.load(open("/tmp/env.json"))["folder_id"]
+            script = json.load(open("/tmp/codeout/script.json"))
+            env.save_script(service, folder_id, script)
+            PY
+            python3 -m pipeline.drive.drive_queue update --id "$QID" --status rendering
             echo "regenerated the scene code for queue entry $QID (attempt $REGEN)"
           elif [ "$RC" -ne 0 ]; then
             echo "repair.py failed with exit $RC"
