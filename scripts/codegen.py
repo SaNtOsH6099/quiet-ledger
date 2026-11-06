@@ -8,6 +8,15 @@ GSAP timeline that animates it. Different scenes get different code
 because the story is different. The five old fixed templates are
 reference only now; they are not used at render time.
 
+Two things are done for the brain, not asked of it, because asking
+failed in testing (run 42167255930: the brain wrote real code but
+systematically omitted the exit, and the long prompt burned Groq's
+token budget on retries):
+  - The prompt is kept short (one compact example, not two long ones),
+    so one beat's call fits comfortably in the free token budget.
+  - The exit fade and hard kill are appended mechanically after the
+    brain returns the timeline, so a beat can never ship without them.
+
 Input: script.json from draft.py (script + beats with "sentences" and
 "idea"). Output: the same script.json with a "code" list added, one
 entry per beat: {"markup": ..., "timeline": ...}.
@@ -15,9 +24,8 @@ entry per beat: {"markup": ..., "timeline": ...}.
 Each beat's code is validated before it is accepted:
   - markup is one beat div with the %%ID%% / %%START%% / %%DURATION%%
     placeholders and no other placeholders left over.
-  - timeline is GSAP JS that ends with the hard kill
-    tl.set("#%%ID%%", { opacity: 0 }, E), and it parses under
-    `node --check` (real JS syntax, not a guess).
+  - timeline is GSAP JS that parses under `node --check` (real JS
+    syntax, not a guess) and ends with the hard kill (appended above).
 A beat that fails validation is retried by the brain rotation; a beat
 that cannot be written fails the draft instead of shipping bad code.
 
@@ -37,72 +45,44 @@ from draft import generate, split_sentences  # noqa: E402
 
 DESIGN_SYSTEM = '''You write the drawn scene for one beat of a narrated
 explainer. Every scene is drawn in code (line drawings, charts, stick
-figures, kinetic text, diagrams). No photos, no generated imagery,
-nothing that is not drawn. Invent the visual approach that best serves
-THIS scene; do not copy a fixed template.
+figures, kinetic text, diagrams). No photos, no generated imagery.
+Invent the visual approach that best serves THIS scene.
 
-DESIGN SYSTEM (the look):
-- Canvas: 1080 wide x 1920 tall, vertical. All coordinates are in this space.
-- Background: warm paper #f6f1e7 (already in the page; do not set a
-  background in your beat).
-- Ink: #1c1c1c. Red accent: #d9481f. Blue: #2b5ea7. Grey text: #8a8378.
-  Muted: #5c564a.
-- Font: Geist (sans-serif), weights 500, 600, 700, 800. Use the shared
-  classes below when they fit, or inline styles.
-- Shared CSS classes (already defined; use them, do not redefine):
-  .eyebrow: small caps kicker, 34px, letter-spacing 10px, grey, centered.
-  .hook-line: huge kinetic text, 116px, weight 800, centered,
-    white-space nowrap. Wrap each word in <span class="w">word</span>,
-    and add red for red words: <span class="w red">word</span>.
-  .chart-title: 40px, weight 800, letter-spacing 6px, centered.
-  .chart-sub: 30px, weight 500, grey, centered.
-  .caption-line: 34px, weight 600, muted, italic, centered.
-  .diagram-title: 44px, weight 800, letter-spacing 6px, centered.
-  .close-line: 104px, weight 800, centered, white-space nowrap.
-    Same .w spans as hook-line.
-  .close-sub: 38px, weight 600, grey, centered.
-  SVG text: .axis-label (28px, 600, grey), .month-label (28px, 600, grey,
-    centered), .peak-label (44px, 800), .scale-label (30px, 600, grey),
-    .note (28px, 500, grey, italic), .part-label (32px, 600, muted).
-  .red: color #d9481f. .blue: color #2b5ea7.
-- You may use inline styles and your own classes for elements these do
-  not cover. Keep font sizes in the same range (body 28-34px, titles
-  40-44px, big words 100-116px).
+CANVAS AND LOOK:
+- 1080 wide x 1920 tall, vertical. All coordinates are in this space.
+- Background is warm paper #f6f1e7 (already in the page; do not set one).
+- Ink #1c1c1c, red accent #d9481f, blue #2b5ea7, grey text #8a8378.
+- Font Geist, weights 500/600/700/800. Shared classes (use them, do
+  not redefine): .eyebrow (34px caps kicker, grey), .hook-line (116px
+  weight 800, centred; wrap each word in <span class="w">word</span>,
+  red words get <span class="w red">), .chart-title (40px, 800),
+  .chart-sub (30px, grey), .caption-line (34px, muted, italic),
+  .diagram-title (44px, 800), .close-line (104px, 800; same .w spans),
+  .close-sub (38px, grey). SVG text: .axis-label, .month-label,
+  .peak-label (44px, 800), .scale-label, .note, .part-label.
+- Inline styles are fine for anything these do not cover. Body text
+  28-34px, titles 40-44px, big words 100-116px.
 
-STRUCTURE (how a beat is built):
-- Your markup is ONE div:
+STRUCTURE:
+- Markup is ONE div:
   <div id="%%ID%%" class="beat clip" data-start="%%START%%"
    data-duration="%%DURATION%%" data-track-index="N">...</div>
   Use the exact placeholders %%ID%%, %%START%%, %%DURATION%%.
-  Set data-track-index to your beat number (1 for the first beat, and
-  so on).
-- Inside the div, use HTML (divs with the shared classes) and/or SVG
+  data-track-index is your beat number (1 for the first beat).
+- Inside, use HTML divs and/or one SVG
   (<svg width="1080" height="1920"
-   style="position:absolute;inset:0;overflow:visible;">...</svg>).
-  SVG coordinates are in the 1080x1920 space.
-- Keep everything inside the canvas: left margin at least 40px, right
-  edge at most 1040px, top at least 120px, bottom at most 1800px. Do
-  not let text or shapes overflow the edges or overlap each other.
-- Your timeline is GSAP JavaScript. Two variables are already defined:
-  S (the beat's start time in seconds) and E (the beat's end time).
-  tl is the GSAP timeline. Two helpers are available: prepDraw(path)
-  (prepares an SVG path for a draw-on animation; returns its length)
-  and dashLen(selector) (returns a path's length).
-- Animate with tl.fromTo(...), tl.to(...), tl.set(...). Use ease
-  "power2.inOut" or "power3.out". Stagger word-by-word builds with
-  stagger 0.11.
-- The beat starts hidden. Fade it in at S, for example:
-  tl.fromTo("#%%ID%%", { opacity: 0 }, { opacity: 1, duration: 0.4 }, S);
-- CRITICAL, the hard kill: your timeline MUST end with the exit fade
-  and then the hard kill, in this order:
-  tl.to("#%%ID%%", { opacity: 0, duration: 0.4 }, E - 0.4);
-  tl.set("#%%ID%%", { opacity: 0 }, E);
-  This guarantees the beat is hidden at its end. If you omit the hard
-  kill, the video is broken.
-- Do not reference any element id you did not define in your own
-  markup. All ids must start with %%ID%%- (for example %%ID%%-line).
-- Do not put a <script> tag in your markup. Do not use the
-  <!--TIMELINE--> marker; markup and timeline are separate fields.
+   style="position:absolute;inset:0;overflow:visible;">).
+- Keep everything inside the canvas: left margin 40px, right edge
+  1040px, top 120px, bottom 1800px. No overflow, no overlap.
+- Timeline is GSAP JS. S is the beat start, E the beat end, tl the
+  timeline. Helpers: prepDraw(path) readies an SVG path for draw-on
+  (returns its length); dashLen(selector) returns a path length.
+- Animate with tl.fromTo / tl.to / tl.set, ease "power2.inOut" or
+  "power3.out". Stagger word builds with stagger 0.11.
+- Fade the beat in at S. Do NOT write the exit: the exit fade and the
+  hard kill are added for you. Just animate the scene itself.
+- Do not reference an id you did not define. All ids start with %%ID%%-.
+- No <script> tag in markup. No <!--TIMELINE--> marker.
 
 EXAMPLE (kinetic hook; copy the pattern, invent the content):
 markup:
@@ -114,49 +94,18 @@ markup:
   </svg>
 </div>
 timeline:
+tl.fromTo("#%%ID%%", { opacity: 0 }, { opacity: 1, duration: 0.4 }, S);
 tl.fromTo("#%%ID%% .eyebrow", { opacity: 0, y: 14 }, { opacity: 1, y: 0, duration: 0.5 }, S + 0.15);
 document.querySelectorAll("#%%ID%% .hook-line").forEach(function (line, li) {
   tl.fromTo(line.querySelectorAll(".w"), { x: 70, opacity: 0 }, { x: 0, opacity: 1, duration: 0.32, stagger: 0.11 }, S + 0.25 + li * 0.5);
 });
 var swooshLen = prepDraw(document.getElementById("%%ID%%-swoosh"));
 tl.fromTo("#%%ID%%-swoosh", { strokeDashoffset: swooshLen, opacity: 0 }, { strokeDashoffset: 0, opacity: 1, duration: 0.5, ease: "power2.inOut" }, S + 1.9);
-tl.to("#%%ID%%", { opacity: 0, duration: 0.4, ease: "power1.inOut" }, E - 0.4);
-tl.set("#%%ID%%", { opacity: 0 }, E);
-
-EXAMPLE (chart; copy the pattern, invent the content):
-markup:
-<div id="%%ID%%" class="beat clip" data-start="%%START%%" data-duration="%%DURATION%%" data-track-index="2">
-  <div class="chart-title" style="top: 170px;">TEMPERATURE RISES</div>
-  <div class="chart-sub" style="top: 235px;">summer heat, month by month</div>
-  <svg width="1080" height="1920" style="position:absolute;inset:0;overflow:visible;">
-    <polyline id="%%ID%%-line-0" class="series-line" data-dot="%%ID%%-dot-0" points="150,1100 400,900 650,700 900,500" fill="none" stroke="#d9481f" stroke-width="7" stroke-linecap="round" stroke-linejoin="round" />
-    <circle id="%%ID%%-dot-0" r="13" fill="#d9481f" stroke="#f6f1e7" stroke-width="4" cx="150" cy="1100" opacity="0" />
-    <text id="%%ID%%-peak-0" class="peak-label" x="900" y="470" fill="#d9481f" opacity="0">30&deg;</text>
-  </svg>
-  <div class="caption-line" style="top: 1420px;">the hotter it gets, the taller it grows</div>
-</div>
-timeline:
-tl.fromTo("#%%ID%%", { opacity: 0 }, { opacity: 1, duration: 0.4, ease: "power1.inOut" }, S);
-tl.fromTo("#%%ID%% .chart-title", { opacity: 0, y: 12 }, { opacity: 1, y: 0, duration: 0.4 }, S + 0.1);
-document.querySelectorAll("#%%ID%% .series-line").forEach(function (path, si) {
-  var len = prepDraw(path);
-  var dot = document.getElementById(path.getAttribute("data-dot"));
-  var drawDur = Math.max(2, (E - S - 2) * 0.55);
-  tl.fromTo(path, { strokeDashoffset: len }, { strokeDashoffset: 0, duration: drawDur, ease: "none",
-    onUpdate: function () {
-      var p = 1 - parseFloat(path.style.strokeDashoffset) / len;
-      var pt = path.getPointAtLength(Math.max(0, p * len));
-      dot.setAttribute("cx", pt.x); dot.setAttribute("cy", pt.y);
-    } }, S + 0.4 + si * 1.4);
-  tl.fromTo(dot, { opacity: 0 }, { opacity: 1, duration: 0.3 }, S + 0.5 + si * 1.4);
-  tl.to(dot, { opacity: 0, duration: 0.3 }, S + 0.4 + si * 1.4 + drawDur);
-  tl.set(dot, { opacity: 0 }, S + 0.4 + si * 1.4 + drawDur + 0.3);
-  tl.fromTo("#%%ID%%-peak-" + si, { opacity: 0, scale: 0.7, transformOrigin: "0% 100%" }, { opacity: 1, scale: 1, duration: 0.4, ease: "back.out(2)" }, S + 0.4 + si * 1.4 + drawDur + 0.2);
-});
-tl.fromTo("#%%ID%% .caption-line", { opacity: 0, y: 12 }, { opacity: 1, y: 0, duration: 0.5 }, E - 3.5);
-tl.to("#%%ID%%", { opacity: 0, duration: 0.4, ease: "power1.inOut" }, E - 0.4);
-tl.set("#%%ID%%", { opacity: 0 }, E);
 '''
+
+# The exit every beat gets, appended mechanically (see module docstring).
+EXIT_FADE = 'tl.to("#%%ID%%", { opacity: 0, duration: 0.4 }, E - 0.4);'
+HARD_KILL = 'tl.set("#%%ID%%", { opacity: 0 }, E);'
 
 
 def code_prompt(script, beat, beat_no, n_beats, est_seconds):
@@ -175,17 +124,18 @@ YOUR BEAT (beat {beat_no} of {n_beats}):
 The narration for this beat says: "{spoken}"
 Visual idea: {beat["idea"]}
 About {est_seconds:.1f} seconds long. Pace the animation to fill that
-time: build, hold, then exit. Do not rush; do not leave dead air.
+time: build, hold, then stop. Do not rush; do not leave dead air.
 
 Return ONLY a JSON object with this exact shape:
 {{
   "markup": "<div id=\\"%%ID%%\\" class=\\"beat clip\\" ...>...</div>",
-  "timeline": "tl.fromTo(...); ... tl.set(\\"#%%ID%%\\", {{ opacity: 0 }}, E);"
+  "timeline": "tl.fromTo(...); ..."
 }}
 
 Rules:
 - "markup" is one beat div, exactly as specified above.
-- "timeline" is GSAP JavaScript using S and E, ending with the hard kill.
+- "timeline" is GSAP JavaScript using S and E. Animate the scene only;
+  do not write the exit, it is added for you.
 - No em dashes. No markdown. No text outside the JSON object.
 '''
 
@@ -214,8 +164,25 @@ def _js_syntax_ok(js):
     return None
 
 
+def append_exit(timeline):
+    """Append the exit fade + hard kill if the brain omitted them.
+    The hard kill is the guarantee the beat is hidden at E; without it
+    the video is broken. Appending mechanically is reliable where
+    asking the brain was not (it omitted them on every attempt)."""
+    tl = timeline.rstrip()
+    if HARD_KILL in tl:
+        return tl
+    # If the brain wrote its own exit fade but no hard kill, keep the
+    # fade and just add the kill after it.
+    if 'tl.to("#%%ID%%", { opacity: 0' in tl:
+        return tl + "\n" + HARD_KILL
+    return tl + "\n" + EXIT_FADE + "\n" + HARD_KILL
+
+
 def validate_code(obj):
-    """Check one beat's generated code. Returns a list of problems."""
+    """Check one beat's generated code. Returns a list of problems.
+    Runs on the timeline AFTER append_exit, so the hard kill is
+    guaranteed present; validation here is about structure and syntax."""
     problems = []
     if not isinstance(obj, dict):
         return ["top level is not a JSON object"]
@@ -244,13 +211,11 @@ def validate_code(obj):
     bad = leftovers - {"ID", "START", "DURATION"}
     if bad:
         problems.append(f"markup has unfilled placeholders: {sorted(bad)}")
-    # the hard kill must be present, and it must come after an exit fade
-    kill = 'tl.set("#%%ID%%", { opacity: 0 }, E)'
-    if kill not in timeline:
+    # the hard kill must be present (append_exit guarantees it; if the
+    # brain wrote a timeline that already ends with it, it is kept)
+    if HARD_KILL not in timeline:
         problems.append("timeline is missing the hard kill "
                         'tl.set("#%%ID%%", { opacity: 0 }, E)')
-    if 'tl.to("#%%ID%%", { opacity: 0' not in timeline:
-        problems.append("timeline is missing the exit fade to opacity 0")
     err = _js_syntax_ok(timeline)
     if err:
         problems.append(f"timeline has a JS syntax error: {err}")
@@ -275,10 +240,17 @@ def codegen(script_obj):
         obj, provider = generate(
             DESIGN_SYSTEM,
             code_prompt(script, beat, beat_no, len(beats), est),
-            validate_code,
+            # validate on the timeline with the exit appended, so the
+            # brain is judged on the scene, not on remembering the exit
+            lambda o: validate_code({
+                "markup": o.get("markup"),
+                "timeline": append_exit(o.get("timeline", ""))
+                if isinstance(o.get("timeline"), str) else o.get("timeline"),
+            }),
             f"code for beat {beat_no}",
         )
-        code.append({"markup": obj["markup"], "timeline": obj["timeline"]})
+        timeline = append_exit(obj["timeline"])
+        code.append({"markup": obj["markup"], "timeline": timeline})
         print(f"  beat {beat_no} code written via {provider}", flush=True)
     return code
 
