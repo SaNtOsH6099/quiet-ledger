@@ -156,7 +156,7 @@ def main():
     if args.words:
         words = json.load(open(args.words))
     else:
-        from captions import whisper_words  # noqa: PLC0415
+        from .captions import whisper_words  # noqa: PLC0415
 
         words = whisper_words(args.audio, args.model)
     with open(os.path.join(args.out_dir, "words.json"), "w") as f:
