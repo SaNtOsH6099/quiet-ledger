@@ -5,11 +5,12 @@ needs a card.
 
 ## Keys (repo Settings, Secrets and variables, Actions)
 
-- [x] `GROQ_API_KEYS`: free keys from console.groq.com, comma-separated
-- [x] `GEMINI_API_KEYS`: free keys from Google AI Studio, comma-separated
-- [ ] `NVIDIA_API_KEYS`: free nvapi- keys from build.nvidia.com, comma-separated (fallback only, optional for now)
+No brain keys: no model is called from Actions, so there is nothing
+to add here. (The Groq, Gemini and NVIDIA keys from the old setup are
+no longer used by the pipeline. They can be deleted from the repo
+secrets, or left in place; the workflow never reads them.)
 
-## Drive (see README section 2 for the step-by-step)
+## Drive (see README section 1 for the step-by-step)
 
 - [x] Google Cloud project created, Drive API enabled
 - [x] OAuth consent screen set up (External) and app published to Production
@@ -24,14 +25,13 @@ folder. That is why the pipeline signs in as you through OAuth.
 
 ## First run
 
-- [x] Actions, quiet-ledger, Run workflow, stage `draft`, with a topic
-- [ ] Draft artifact downloaded, `script.md` read
-- [ ] Queue entry in Drive changed to `approved`
-- [ ] Run workflow again, stage `render`
+- [ ] Muse writes a script and pushes it to `submissions/<slug>/script.json`
+- [ ] Actions, quiet-ledger, Run workflow (queue_id empty: next approved entry)
+- [ ] Ingest files the submission into Drive and marks it approved
 - [ ] Finished file and thumbnail found in the Drive folder
 - [ ] Watched it, happy with it
 
 ## After the first finished file
 
-- [ ] Daily schedule left on (09:00 IST, builds the next approved entry)
+- [ ] Daily schedule left on (09:00 IST, ingests any new submission, builds the next approved entry)
 - [ ] Control app build starts (see `control-app/README.md`)

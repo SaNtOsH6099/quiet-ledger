@@ -41,7 +41,7 @@ def narrate(text, out_path, voice="af_heart", speed=0.8):
 def main():
     parser = argparse.ArgumentParser(description="Kokoro narration, one take")
     parser.add_argument("--script", required=True,
-                        help="script.json from draft.py")
+                        help="script.json (submitted by Muse)")
     parser.add_argument("--out", required=True)
     parser.add_argument("--voice", default="af_heart")
     parser.add_argument("--speed", type=float, default=0.8)

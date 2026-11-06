@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
-"""Draw the scenes: brain-written scene code -> HyperFrames composition
+"""Draw the scenes: Muse-written scene code -> HyperFrames composition
 -> silent frames.
 
-The scene code comes from codegen.py (one markup + timeline per beat,
-written by the brain for that specific scene; no fixed templates).
-This script only assembles it: beat boundaries come from the whisper
-word timings, the code is slotted into templates/base.html, and
-HyperFrames checks and renders the result.
+The scene code comes with the script (one markup + timeline per beat,
+written by Muse for that specific scene; no fixed templates). Muse
+writes the code, validates it, and renders a demo locally before the
+script is ever submitted; this script only assembles it: beat
+boundaries come from the whisper word timings, the code is slotted
+into templates/base.html, and HyperFrames checks and renders the
+result.
 
 Steps:
   1. Get whisper word timings for the narration (from --words, or by
@@ -14,7 +16,7 @@ Steps:
      a beat starts at the first word of its first sentence and ends at
      the last word of its last sentence.
   2. Build a HyperFrames index.html from templates/base.html and the
-     brain-written markup + timeline for each beat.
+     Muse-written markup + timeline for each beat.
   3. Run `hyperframes check`, then `hyperframes render`. The render is
      silent; narration and captions join it at assembly.
   4. Write out words.json, timings.json (beat boundaries + total length)
@@ -88,18 +90,19 @@ def beat_boundaries(script, beats, words):
 
 
 def build_index(templates_dir, scenes, bounds, total):
-    """Assemble the HyperFrames page from the brain-written beat code.
+    """Assemble the HyperFrames page from the Muse-written beat code.
     No fixed templates: each beat's markup + timeline comes from
-    scenes["code"], written by codegen.py for that specific scene.
+    scenes["code"], written by Muse for that specific scene.
     This only fills in the beat id, start, and duration, and slots the
     beats into base.html."""
     if "code" not in scenes:
         raise RuntimeError(
-            "script.json has no 'code'; run codegen.py after draft.py")
+            "script.json has no 'code'; the script needs scene code "
+            "written by Muse first (see PIPELINE.md)")
     if len(scenes["code"]) != len(scenes["beats"]):
         raise RuntimeError(
             f"code has {len(scenes['code'])} beats but the plan has "
-            f"{len(scenes['beats'])}; re-run codegen.py")
+            f"{len(scenes['beats'])}; the code does not match the beats")
     fmt = scenes.get("format", "shorts")
     base_name = guardrails.get(fmt)["base_template"]
     base = open(os.path.join(templates_dir, base_name)).read()
@@ -138,7 +141,7 @@ def build_index(templates_dir, scenes, bounds, total):
 def main():
     parser = argparse.ArgumentParser(description="draw the scenes")
     parser.add_argument("--scenes", required=True,
-                        help="script.json from draft.py")
+                        help="script.json (submitted by Muse)")
     parser.add_argument("--audio", required=True, help="narration wav")
     parser.add_argument("--templates", required=True)
     parser.add_argument("--out-dir", required=True)
@@ -153,13 +156,16 @@ def main():
     os.makedirs(args.work_dir, exist_ok=True)
     scenes = json.load(open(args.scenes))
 
-    # Safety net: never render stale or invalid scene code. The voice
-    # job runs codegen --check first, so this should already be fresh;
-    # if it is not (for example a manual render, or a check that was
-    # skipped), fail loudly instead of silently replaying broken code
-    # (the failure that shipped entry 3's clipped hook and missing
-    # closing text twice). Exit 3 means "regenerate the code".
-    from pipeline.brain.codegen import stored_code_is_fresh  # noqa: PLC0415
+    # Safety net: never render stale or invalid scene code. The
+    # ingest job validates the code before it reaches Drive, so this
+    # should already be fresh; if it is not (for example a manual
+    # render, or a check that was skipped), fail loudly instead of
+    # silently replaying broken code (the failure that shipped entry
+    # 3's clipped hook and missing closing text twice). Exit 3 means
+    # "the stored code is stale or invalid; Muse must fix the script
+    # and submit a corrected one" -- there is no brain in Actions to
+    # regenerate it.
+    from pipeline.validate.scene import stored_code_is_fresh  # noqa: PLC0415
 
     fmt = scenes.get("format", "shorts")
     problems = stored_code_is_fresh(scenes, fmt)
@@ -168,8 +174,8 @@ def main():
               file=sys.stderr)
         for p in problems:
             print(f"  - {p}", file=sys.stderr)
-        print("run: python3 -m pipeline.brain.codegen script.json out "
-              "--check", file=sys.stderr)
+        print("fix the script and submit a corrected one; "
+              "no code is regenerated here", file=sys.stderr)
         return 3
 
     if args.words:

@@ -1,6 +1,6 @@
 -r base.txt
 # Google Drive (queue + upload). Pillow comes from base.txt: the CSS
-# check measures the rendered width of the brain's text lines with
+# check measures the rendered width of Muse's text lines with
 # DejaVu Sans so clipped text is caught before the code is accepted.
 google-api-python-client==2.181.0
 google-auth==2.41.1

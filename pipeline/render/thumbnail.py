@@ -73,7 +73,7 @@ def title_from_script(script_obj):
 def main():
     parser = argparse.ArgumentParser(description="draw the thumbnail")
     parser.add_argument("--script", required=True,
-                        help="script.json from draft.py")
+                        help="script.json (submitted by Muse)")
     parser.add_argument("--out", required=True)
     parser.add_argument("--eyebrow", default="A strange fact")
     args = parser.parse_args()

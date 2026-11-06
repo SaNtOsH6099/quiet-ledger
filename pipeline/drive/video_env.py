@@ -30,7 +30,8 @@ video's folder for its details.
 
 This module is the only place that touches a video's folder. The
 queue module (drive_queue.py) only touches queue.json. Render reads
-the script from the folder; draft writes it there; upload files it
+the script from the folder; the ingest step writes it there (from a
+script Muse submitted to the repo); upload files the finished video
 there.
 """
 import io

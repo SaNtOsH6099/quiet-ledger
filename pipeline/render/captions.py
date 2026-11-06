@@ -113,7 +113,7 @@ def build_ass(script_text, words, out_path):
 def main():
     parser = argparse.ArgumentParser(description="word-timed captions")
     parser.add_argument("--script", required=True,
-                        help="script.json from draft.py")
+                        help="script.json (submitted by Muse)")
     parser.add_argument("--out", required=True, help="captions.ass to write")
     parser.add_argument("--words", default=None,
                         help="words.json from faster-whisper")

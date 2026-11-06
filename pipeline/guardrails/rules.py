@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Guardrails: the basic rules the brain's scene code must obey, per format.
+"""Guardrails: the basic rules Muse's scene code must obey, per format.
 
 The rules live in guardrails.json (data, not code) so the control app
 can read and change them later without a code push. This module loads
@@ -7,9 +7,9 @@ that file and falls back to the built-in defaults if it is missing or
 unreadable, so the pipeline never breaks on a bad config.
 
 Shorts and long-form are different mediums, so they get different
-rules. The code writer (codegen.py) puts the format's rules in the
-prompt and enforces them in validation; a beat that breaks a rule is
-rejected and retried, never shipped.
+rules. Muse writes the code against the format's rules, and the
+validator (pipeline.validate.code) enforces them; a beat that breaks
+a rule is rejected and fixed, never shipped.
 
 Why this exists: entry 3's first render passed the HyperFrames check
 but shipped a hook line cut off at the frame edge (one 10-word line

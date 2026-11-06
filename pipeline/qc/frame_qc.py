@@ -29,8 +29,9 @@ positive.
 Usage: frame_qc.py --video final.mp4 --script script.json
          --timings timings.json --out qc-report.json [--work-dir work/qc]
 Exit 0 when every check passes. Exit 1 with a clear error line when
-a defect is found (the line starts with "frame_qc:" so the repair
-job recognises it as a scene-code defect and regenerates the code).
+a defect is found (the line starts with "frame_qc:" so it is
+recognisable as a scene-code defect: Muse fixes the code and submits
+a corrected script).
 """
 import argparse
 import json
