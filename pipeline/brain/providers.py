@@ -107,7 +107,7 @@ def call_groq(key, system, user):
             "reasoning_effort": "low",
             "response_format": {"type": "json_object"},
             "temperature": 0.7,
-            "max_completion_tokens": 65535,
+            "max_completion_tokens": 2700,
         },
     )["choices"][0]["message"]["content"]
 
@@ -126,7 +126,7 @@ def call_gemini(key, system, user):
             "generationConfig": {
                 "responseMimeType": "application/json",
                 "temperature": 0.7,
-                "maxOutputTokens": 65535,
+                "maxOutputTokens": 65236,
             },
         },
     )
@@ -174,7 +174,7 @@ def call_nvidia(key, system, user):
                     ],
                     "response_format": {"type": "json_object"},
                     "temperature": 0.7,
-                    "max_tokens": 65999,
+                    "max_tokens": 65700,
                 },
                 timeout=45,
             )["choices"][0]["message"]["content"]
