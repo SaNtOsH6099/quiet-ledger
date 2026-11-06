@@ -60,6 +60,12 @@ CANVAS AND LOOK:
   .diagram-title (44px, 800), .close-line (104px, 800; same .w spans),
   .close-sub (38px, grey). SVG text: .axis-label, .month-label,
   .peak-label (44px, 800), .scale-label, .note, .part-label.
+- BIG TEXT RULE: .hook-line and .close-line do NOT wrap. One line
+  holds at most 3 short words (about 20 characters). A full sentence
+  on one line overflows the frame and is cut off. Break long text
+  into MULTIPLE short lines, one .hook-line or .close-line div per
+  phrase, stacked vertically. Never put a whole sentence on one big
+  text line.
 - Inline styles are fine for anything these do not cover. Body text
   28-34px, titles 40-44px, big words 100-116px.
 
@@ -189,6 +195,23 @@ def append_exit(timeline):
     return tl + "\n" + EXIT_FADE + "\n" + HARD_KILL
 
 
+def _big_line_too_long(markup):
+    """Return the text of any .hook-line / .close-line that is too long.
+    These classes do not wrap, so a long line overflows the frame and
+    is cut off (the failure that shipped in entry 3's first render).
+    A line holds at most 4 words / 24 characters."""
+    # find each big-text div and measure its plain text
+    for m in re.finditer(
+            r'<div class="(?:hook-line|close-line)"[^>]*>(.*?)</div>',
+            markup, re.DOTALL):
+        inner = m.group(1)
+        text = re.sub(r"<[^>]+>", " ", inner)
+        text = re.sub(r"\s+", " ", text).strip()
+        if len(text) > 24 or len(text.split()) > 4:
+            return text
+    return None
+
+
 def validate_code(obj):
     """Check one beat's generated code. Returns a list of problems.
     Runs on the timeline AFTER append_exit, so the hard kill is
@@ -221,6 +244,13 @@ def validate_code(obj):
     bad = leftovers - {"ID", "START", "DURATION"}
     if bad:
         problems.append(f"markup has unfilled placeholders: {sorted(bad)}")
+    # big text lines do not wrap; a long one is cut off at the frame edge
+    long_line = _big_line_too_long(markup)
+    if long_line:
+        problems.append(
+            f"a big text line is too long and will be cut off: "
+            f"{long_line[:40]!r} (max 4 words / 24 chars per line; "
+            "break it into multiple short lines)")
     # the hard kill must be present (append_exit guarantees it; if the
     # brain wrote a timeline that already ends with it, it is kept)
     if HARD_KILL not in timeline:
@@ -267,9 +297,10 @@ def codegen(script_obj):
 
 def main():
     if len(sys.argv) < 3:
-        print("usage: codegen.py SCRIPT_JSON OUT_DIR", file=sys.stderr)
+        print("usage: codegen.py SCRIPT_JSON OUT_DIR [--regen]", file=sys.stderr)
         return 2
     script_path, out_dir = sys.argv[1], sys.argv[2]
+    regen = "--regen" in sys.argv[3:]
     os.makedirs(out_dir, exist_ok=True)
     script_obj = json.load(open(script_path))
     if "beats" not in script_obj or "script" not in script_obj:
@@ -278,9 +309,16 @@ def main():
         return 2
     code = codegen(script_obj)
     script_obj["code"] = code
+    if regen:
+        # Count regenerations so the repair loop can stop after 3
+        # instead of looping forever on a stubbornly bad layout.
+        script_obj["code_regen_count"] = script_obj.get(
+            "code_regen_count", 0) + 1
     with open(os.path.join(out_dir, "script.json"), "w") as f:
         json.dump(script_obj, f, indent=2)
     print(f"code written for {len(code)} beats")
+    if regen:
+        print(f"code_regen_count is now {script_obj['code_regen_count']}")
     return 0
 
 

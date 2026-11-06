@@ -391,9 +391,14 @@ jobs:
             echo "queue_id=$QID" >> "$GITHUB_OUTPUT"
             python3 scripts/drive_queue.py get --id "$QID" > /tmp/entry.json
             python3 -c "import json; e=json.load(open('/tmp/entry.json')); json.dump(e['script'], open('/tmp/script.json','w'), indent=2)"
-            python3 scripts/codegen.py /tmp/script.json /tmp/codeout
+            python3 scripts/codegen.py /tmp/script.json /tmp/codeout --regen
+            REGEN=$(python3 -c "import json; print(json.load(open('/tmp/codeout/script.json')).get('code_regen_count', 0))")
+            if [ "$REGEN" -gt 3 ]; then
+              echo "scene code regenerated $REGEN times and still failing; a human needs to look"
+              exit 1
+            fi
             python3 scripts/drive_queue.py update --id "$QID" --status rendering --script-file /tmp/codeout/script.json
-            echo "regenerated the scene code for queue entry $QID"
+            echo "regenerated the scene code for queue entry $QID (attempt $REGEN)"
           elif [ "$RC" -ne 0 ]; then
             echo "repair.py failed with exit $RC"
             exit "$RC"
