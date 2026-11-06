@@ -35,6 +35,7 @@ import re
 import subprocess
 import tempfile
 
+from pipeline.assets import catalog as asset_catalog
 from pipeline.guardrails import rules as guardrails
 from pipeline.guardrails import css_check
 
@@ -152,6 +153,19 @@ def validate_code(obj, fmt="shorts"):
             f"a big text line is too long and will be cut off: "
             f"{text[:40]!r} (max {max_words} words / {max_chars} chars "
             "per line; break it into multiple short lines)")
+    # asset references: a <g data-asset="..."> element is valid
+    # markup, but the id must exist in the catalog -- a hallucinated
+    # id would fail loudly at render time, so catch it here instead.
+    # When there is no catalog yet (fresh checkout, pack not built),
+    # skip the check rather than failing every beat.
+    referenced = set(re.findall(r'data-asset="([^"]+)"', markup))
+    if referenced:
+        by_id = asset_catalog.assets_by_id()
+        if asset_catalog.load_catalog() is not None:
+            for asset_id in sorted(referenced):
+                if asset_id not in by_id:
+                    problems.append(
+                        f"asset id {asset_id!r} not found in catalog")
     # CSS check: measure the actual rendered width of every text line
     # from the stylesheet and flag any that would run off the frame.
     # The word-count rule above is a proxy; this is the real check,

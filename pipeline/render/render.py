@@ -36,6 +36,7 @@ import shutil
 import subprocess
 import sys
 
+from pipeline.assets.resolve import resolve_assets
 from pipeline.guardrails import rules as guardrails  # format canvas + base template
 
 W, H = 1080, 1920
@@ -114,6 +115,10 @@ def build_index(templates_dir, scenes, bounds, total):
         markup = code["markup"].replace("%%ID%%", beat_id)
         markup = markup.replace("%%START%%", f"{max(0.0, start - 0.4):.2f}")
         markup = markup.replace("%%DURATION%%", f"{duration:.2f}")
+        # inline any catalog assets the beat references
+        # (<g data-asset="...">); a beat with no references is
+        # returned unchanged.
+        markup = resolve_assets(markup)
         if "%%" in markup:
             raise RuntimeError(
                 f"{beat_id} markup still has an unfilled placeholder")
