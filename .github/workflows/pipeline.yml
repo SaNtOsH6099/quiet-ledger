@@ -323,3 +323,74 @@ jobs:
           ID=$(python3 -c "import json; print(json.load(open('out/meta.json'))['queue_id'])")
           TOPIC=$(python3 -c "import json; print(json.load(open('out/meta.json'))['topic'])")
           python3 scripts/upload_drive.py --file out/final.mp4 --thumbnail out/thumbnail.png --queue-id "$ID" --topic "$TOPIC"
+
+  repair:
+    name: repair the code with the brain
+    needs: [voice, scenes, captions, assemble, thumbnail, upload-drive]
+    if: failure()
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: write
+      actions: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: install Drive tools
+        run: python3 -m pip install -q -r requirements-drive.txt
+      - name: stop after three consecutive repairs
+        run: |
+          if [ "$(git log --format=%s -3 | grep -c '^repair:')" -eq 3 ]; then
+            echo "three consecutive brain repairs already; a human needs to look"
+            exit 1
+          fi
+          echo "repair attempts so far: $(git log --format=%s -3 | grep -c '^repair:')"
+      - name: fetch the failed log and extract the error
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh run view "$GITHUB_RUN_ID" --log-failed > failed.log || true
+          python3 - <<'PY'
+          lines = open("failed.log", encoding="utf-8", errors="replace").read().splitlines()
+          tail = lines[-150:]
+          open("error.txt", "w", encoding="utf-8").write("\n".join(tail))
+          print(f"extracted {len(tail)} lines of error context")
+          PY
+      - name: ask the brain for a fix
+        env:
+          GROQ_API_KEYS: ${{ secrets.GROQ_API_KEYS }}
+          GEMINI_API_KEYS: ${{ secrets.GEMINI_API_KEYS }}
+          NVIDIA_API_KEYS: ${{ secrets.NVIDIA_API_KEYS }}
+        run: python3 scripts/repair.py --error-file error.txt
+      - name: commit the fix, reset the entry, and retry
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DRIVE_OAUTH_JSON: ${{ secrets.DRIVE_OAUTH_JSON }}
+          DRIVE_SERVICE_ACCOUNT_JSON: ${{ secrets.DRIVE_SERVICE_ACCOUNT_JSON }}
+          DRIVE_FOLDER_ID: ${{ secrets.DRIVE_FOLDER_ID }}
+        run: |
+          if git diff --quiet; then
+            echo "repair made no change; nothing to commit"
+            exit 0
+          fi
+          git config user.name "quiet-ledger repair"
+          git config user.email "repair@quiet-ledger.local"
+          git add -A
+          git commit -m "repair: brain fix for failed render (run $GITHUB_RUN_ID)"
+          git push
+          QID="${{ github.event.inputs.queue_id }}"
+          if [ -z "$QID" ]; then
+            QID=$(python3 scripts/drive_queue.py next --status rendering | python3 -c "import json,sys; print(json.load(sys.stdin)['id'])" 2>/dev/null || echo "")
+          fi
+          if [ -n "$QID" ]; then
+            python3 scripts/drive_queue.py update --id "$QID" --status approved
+            echo "reset queue entry $QID to approved"
+            gh workflow run pipeline.yml --ref main -f stage=render -f queue_id="$QID"
+            echo "re-triggered render for queue entry $QID"
+          else
+            echo "could not determine queue entry; fix committed, re-trigger manually"
+          fi
