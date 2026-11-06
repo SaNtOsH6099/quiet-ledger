@@ -77,6 +77,16 @@ STRUCTURE:
 - Timeline is GSAP JS. S is the beat start, E the beat end, tl the
   timeline. Helpers: prepDraw(path) readies an SVG path for draw-on
   (returns its length); dashLen(selector) returns a path length.
+- Use ONLY core GSAP (tl.fromTo, tl.to, tl.set). Do NOT use motionPath,
+  ScrollTrigger, or any other plugin; they are not loaded and the check
+  fails. To move a dot along a path, draw the path with prepDraw and
+  move the dot in onUpdate with path.getPointAtLength.
+- Only call prepDraw or dashLen on paths, lines, polylines, circles.
+  Never on <text> elements: text has no length, so fade it in with
+  opacity instead of drawing it on.
+- Never compute a tween duration from S or E as an absolute time
+  (for example 14.6 - (S + 2.8)). Use a fixed number of seconds, or a
+  relative length such as (E - S - 2).
 - Animate with tl.fromTo / tl.to / tl.set, ease "power2.inOut" or
   "power3.out". Stagger word builds with stagger 0.11.
 - Fade the beat in at S. Do NOT write the exit: the exit fade and the

@@ -132,6 +132,9 @@ def repair(error, repo):
 # it. The repair job regenerates the scene code instead.
 SCENE_CODE_MARKERS = (
     "hyperframes check",
+    "Check failed",
+    "missing_gsap_plugin",
+    "motionPath",
     "text_box_overflow",
     "content_overlap",
     "caption_exit_missing_hard_kill",

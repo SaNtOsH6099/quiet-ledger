@@ -32,10 +32,18 @@ def api_get(url, token):
         return json.load(resp)
 
 
-def fetch_log_no_auth(url):
-    """Follow a redirect to the log blob without sending auth headers."""
-    req = urllib.request.Request(url, headers={"User-Agent": "quiet-ledger-repair"})
-    # Do not follow redirects automatically; capture the Location.
+def fetch_log(url, token):
+    """Fetch one job's log. Two hops, different auth:
+    - Hop 1, the GitHub API logs endpoint: REQUIRES the token, or it
+      answers 403 even for a public repo.
+    - Hop 2, the temporary blob URL from the 302 Location: the blob
+      REJECTS the Authorization header, so fetch it without auth.
+    The earlier version sent no auth on hop 1, so every repair 403'd."""
+    req = urllib.request.Request(url, headers={
+        "Authorization": f"Bearer {token}",
+        "Accept": "application/vnd.github+json",
+        "User-Agent": "quiet-ledger-repair",
+    })
     opener = urllib.request.build_opener(NoRedirect())
     try:
         with opener.open(req, timeout=120) as resp:
@@ -85,8 +93,8 @@ def main():
     for job in failed:
         print(f"fetching log for failed job: {job['name']}", flush=True)
         try:
-            log = fetch_log_no_auth(
-                f"{api}/jobs/{job['id']}/logs")
+            log = fetch_log(
+                f"{api}/jobs/{job['id']}/logs", token)
         except Exception as e:  # noqa: BLE001
             print(f"  could not fetch log for {job['name']}: {e}",
                   file=sys.stderr)
