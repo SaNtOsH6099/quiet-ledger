@@ -84,7 +84,7 @@ def beat_boundaries(script, beats, words):
     return bounds
 
 
-df build_chart_svg(beat_id, data):
+def build_chart_svg(beat_id, data):
     """Data -> SVG markup for a two-series line chart (one series is fine).
     Returns (svg_string, peak_labels) where peak labels are SVG text."""
     series = data["series"]

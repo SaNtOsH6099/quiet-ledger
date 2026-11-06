@@ -353,13 +353,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh run view "$GITHUB_RUN_ID" --log-failed > failed.log || true
-          python3 - <<'PY'
-          lines = open("failed.log", encoding="utf-8", errors="replace").read().splitlines()
-          tail = lines[-150:]
-          open("error.txt", "w", encoding="utf-8").write("\n".join(tail))
-          print(f"extracted {len(tail)} lines of error context")
-          PY
+          python3 scripts/fetch_failed_log.py --run-id "$GITHUB_RUN_ID" --repo "${{ github.repository }}" --out error.txt
       - name: ask the brain for a fix
         env:
           GROQ_API_KEYS: ${{ secrets.GROQ_API_KEYS }}
