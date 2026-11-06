@@ -43,6 +43,7 @@ import tempfile
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from draft import generate, split_sentences  # noqa: E402
 import guardrails  # noqa: E402
+import css_check  # noqa: E402
 
 
 def design_system(fmt):
@@ -266,6 +267,11 @@ def validate_code(obj, fmt="shorts"):
             f"a big text line is too long and will be cut off: "
             f"{text[:40]!r} (max {max_words} words / {max_chars} chars "
             "per line; break it into multiple short lines)")
+    # CSS check: measure the actual rendered width of every text line
+    # from the stylesheet and flag any that would run off the frame.
+    # The word-count rule above is a proxy; this is the real check,
+    # and it catches long titles and labels too, not just big text.
+    problems.extend(css_check.check_markup(markup, fmt))
     # the hard kill must be present (append_exit guarantees it; if the
     # brain wrote a timeline that already ends with it, it is kept)
     if HARD_KILL not in timeline:

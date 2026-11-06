@@ -1,2 +1,7 @@
 google-api-python-client==2.181.0
 google-auth==2.41.1
+# Pillow for the CSS check (css_check.py): measures the rendered width
+# of the brain's text lines with DejaVu Sans so clipped text is caught
+# before the code is accepted. Falls back to a character-width estimate
+# if Pillow is missing, so this is not load-bearing.
+Pillow==11.3.0
