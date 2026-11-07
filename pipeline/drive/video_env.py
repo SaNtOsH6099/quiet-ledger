@@ -64,21 +64,11 @@ def drive_service(key_file=None, oauth_file=None):
     )
 
 
-def _escape_query_value(value):
-    """Escape a string for use inside a Drive query literal.
-
-    Drive query strings are single-quoted; a literal single quote
-    is escaped as \\'. Without this, a name like "Ruby's pink
-    01.svg" produces an invalid query (HttpError 400 "Invalid
-    Value") and kills the sync."""
-    return value.replace("'", "\\'")
-
-
 def find_folder(service, name, parent_id):
     """Find a folder by name inside parent_id. Returns its id or None."""
     parent = parent_id or "root"
     query = (
-        f"name = '{_escape_query_value(name)}' and "
+        f"name = '{name}' and "
         "mimeType = 'application/vnd.google-apps.folder' and "
         f"trashed = false and '{parent}' in parents"
     )
@@ -109,8 +99,7 @@ def find_or_create_folder(service, name, parent_id):
 
 def find_file(service, name, folder_id):
     """Find a file by name inside folder_id. Returns its id or None."""
-    query = (f"name = '{_escape_query_value(name)}' "
-             "and trashed = false")
+    query = f"name = '{name}' and trashed = false"
     if folder_id:
         query += f" and '{folder_id}' in parents"
     res = (

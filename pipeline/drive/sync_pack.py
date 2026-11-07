@@ -55,8 +55,10 @@ def _is_transient(exc):
     """True when a Drive failure is worth rebuilding the service and
     retrying: an SSL/network failure (including the token-refresh
     ssl.SSLEOFError that kills a sync after ~1 hour, when the
-    long-lived HTTP connection goes stale) or an auth refresh /
-    401/403 failure. Anything else (a bad file, a bad path, a
+    long-lived HTTP connection goes stale), an auth refresh /
+    401/403 failure, or a transient server-side failure (429 rate
+    limit, or 5xx such as a 503 Service Unavailable during a
+    resumable upload). Anything else (a bad file, a bad path, a
     programming error) is not transient and must fail loudly."""
     if isinstance(exc, ssl.SSLError):
         return True
@@ -68,7 +70,7 @@ def _is_transient(exc):
         pass
     try:
         from googleapiclient.errors import HttpError
-        if isinstance(exc, HttpError) and exc.resp.status in (401, 403):
+        if isinstance(exc, HttpError) and exc.resp.status in (401, 403, 429, 500, 502, 503, 504):
             return True
     except ImportError:
         pass
