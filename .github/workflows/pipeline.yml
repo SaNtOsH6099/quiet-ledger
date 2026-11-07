@@ -81,6 +81,8 @@ jobs:
     needs: ingest
     runs-on: ubuntu-latest
     timeout-minutes: 120
+    outputs:
+      has_entry: ${{ steps.entry.outputs.has_entry }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -116,6 +118,8 @@ jobs:
           if r.returncode != 0:
               if "no queue entry with status" in r.stderr:
                   print("no approved queue entry to render, exiting quietly")
+                  with open(os.environ["GITHUB_OUTPUT"], "a") as f:
+                      f.write("has_entry=false\n")
                   sys.exit(0)
               print("queue read failed", file=sys.stderr)
               print(r.stderr, file=sys.stderr)
@@ -148,9 +152,12 @@ jobs:
                   "folder_id": folder_id}
           with open("out/meta.json", "w") as f:
               json.dump(meta, f, indent=2)
+          with open(os.environ["GITHUB_OUTPUT"], "a") as f:
+              f.write("has_entry=true\n")
           print(f"rendering entry {entry['id']}: {entry['topic']}")
           PY
       - name: mark the entry rendering
+        if: steps.entry.outputs.has_entry == 'true'
         env:
           DRIVE_OAUTH_JSON: ${{ secrets.DRIVE_OAUTH_JSON }}
           DRIVE_SERVICE_ACCOUNT_JSON: ${{ secrets.DRIVE_SERVICE_ACCOUNT_JSON }}
@@ -159,8 +166,10 @@ jobs:
           ID=$(python3 -c "import json; print(json.load(open('out/meta.json'))['queue_id'])")
           python3 -m pipeline.drive.drive_queue update --id "$ID" --status rendering
       - name: narrate
+        if: steps.entry.outputs.has_entry == 'true'
         run: python3 -m pipeline.render.voice --script out/script.json --out out/narration.wav
       - uses: actions/upload-artifact@v4
+        if: steps.entry.outputs.has_entry == 'true'
         with:
           name: voice
           path: out/
@@ -170,6 +179,7 @@ jobs:
   scenes:
     name: draw the scenes
     needs: voice
+    if: needs.voice.outputs.has_entry == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 360
     steps:
