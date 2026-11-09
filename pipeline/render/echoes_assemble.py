@@ -190,7 +190,38 @@ def main():
     concat_dur = probe(silent)["duration"]
     print(f"concat {concat_dur:.2f}s (mix {mix_dur:.2f}s)")
     if concat_dur < mix_dur:
-        raise SystemExit("CONCAT TOO SHORT — STOP, do not mux a short chain")
+        # Each segment is encoded at 24 fps, so its duration quantises
+        # to whole frames (1/24s = 0.042s). The chain can therefore land
+        # a frame or two short of the mix even when the timeline is
+        # right — 84 was 0.03s short, 82 was 0.04s short. That is not
+        # a real sync problem: hold the last frame of the last segment
+        # (same tpad hold used above for clips shorter than their
+        # segment) until the chain reaches the mix, then re-concat.
+        # A shortfall over 1.0s is still a real problem — stop.
+        shortfall = mix_dur - concat_dur
+        if shortfall > 1.0:
+            raise SystemExit(
+                f"CONCAT TOO SHORT — STOP, do not mux a short chain "
+                f"(short by {shortfall:.2f}s)")
+        import math
+        pad = math.ceil(shortfall * 24) / 24
+        last = trimmed[-1]
+        padded = os.path.join(args.work_dir, "seg_last_padded.mp4")
+        run(["ffmpeg", "-y", "-v", "error", "-i", last,
+             "-vf", f"tpad=stop_duration={pad:.3f}:stop_mode=clone,fps=24",
+             "-r", "24", "-an",
+             "-c:v", "libx264", "-crf", "18", "-preset", "medium", padded])
+        trimmed[-1] = padded
+        with open(concat_list, "w") as f:
+            for p in trimmed:
+                f.write(f"file '{os.path.abspath(p)}'\n")
+        run(["ffmpeg", "-y", "-v", "error", "-f", "concat", "-safe", "0",
+             "-i", concat_list, "-c", "copy", silent])
+        concat_dur = probe(silent)["duration"]
+        print(f"concat padded +{pad:.3f}s -> {concat_dur:.2f}s "
+              f"(mix {mix_dur:.2f}s)")
+        if concat_dur < mix_dur:
+            raise SystemExit("CONCAT STILL TOO SHORT after padding — STOP")
 
     with_audio = os.path.join(args.work_dir, "with_audio.mp4")
     run(["ffmpeg", "-y", "-v", "error",
