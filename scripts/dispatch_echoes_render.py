@@ -36,6 +36,13 @@ def gh(method, path, body=None):
         cmd.append(json.dumps(body))
     out = subprocess.run(cmd, capture_output=True, text=True)
     if out.returncode != 0:
+        # A workflow_dispatch answers 204 No Content (empty body),
+        # which github_api.py cannot parse as JSON and reports as a
+        # failure — but the dispatch itself succeeded. Treat an empty
+        # body on a dispatch as success; verify with the runs list.
+        if "provider response was not valid JSON" in out.stderr \
+                and not out.stdout.strip():
+            return {}
         print(out.stdout, file=sys.stderr)
         print(out.stderr, file=sys.stderr)
         raise SystemExit(f"github_api {method} {path} failed "
