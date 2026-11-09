@@ -1,6 +1,7 @@
-"""Render: turn Muse's scene code and narration into the finished video.
+"""Render: turn locked Echoes inputs into the finished video.
 
-render.py builds the HyperFrames scenes, voice.py narrates,
-captions.py times the words, assemble.py joins it all, thumbnail.py
-draws the thumbnail.
+echoes_captions.py renders the HyperFrames karaoke captions at 24 fps
+(the caption project itself is still to be ported — see that script).
+echoes_assemble.py trims and concats the locked clips, composites the
+captions, and does the cinema finish (two-pass loudnorm -23 LUFS).
 """
