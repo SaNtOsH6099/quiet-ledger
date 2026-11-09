@@ -1,30 +1,29 @@
 #!/usr/bin/env python3
 """Sync the asset pack to Google Drive, idempotently.
 
-The pack's asset files live on Drive, not in the repo: the repo holds
-only the catalog (assets/catalog.json), the tools, and the pipeline
-code. This module uploads a local pack directory to Drive, mirroring
-its relative paths under a Drive folder, and updates files in place
-when they change.
+The pack's asset files live on Drive, in the "svg assets" folder
+under DRIVE_FOLDER_ID — not in this repo (the repo copy was deleted
+in the 2026-11-09 clean). This module uploads a local pack directory
+to Drive, mirroring its relative paths under that folder, and updates
+files in place when they change. It is kept only for maintaining the
+SVG pack; Echoes does not use the pack, and echoes-render never
+calls this module.
 
-Usage: sync_pack.py --pack-dir assets [--drive-subdir assets] [--dry-run]
+Usage: sync_pack.py --pack-dir assets [--drive-subdir "svg assets"] [--dry-run]
 
   --pack-dir      local directory holding the pack files to upload
                   (the final normalised SVGs by category, plus
                   sources/ for provenance). Defaults to "assets".
   --drive-subdir  Drive folder under DRIVE_FOLDER_ID to mirror into.
-                  Defaults to "assets", so a local
+                  Defaults to "svg assets", so a local
                   "assets/landmarks/eiffel-tower.svg" lands at
-                  <DRIVE_FOLDER_ID>/assets/landmarks/eiffel-tower.svg
-                  -- the same path the resolver fetches, with the
-                  catalog's "file" field recording the part relative
-                  to the `assets/` folder ("landmarks/eiffel-tower.svg").
+                  <DRIVE_FOLDER_ID>/svg assets/landmarks/eiffel-tower.svg.
   --dry-run       print what would change without uploading anything.
 
-SVG files only: the catalog, the tools, and the docs live in the repo
-and are never uploaded (they are not .svg files, so the walk skips
-them). The staging intermediates are also skipped (--exclude
-staging), so only the final normalised SVGs and the sources go up.
+SVG files only: only .svg files are uploaded (the walk skips
+everything else). The staging intermediates are also skipped
+(--exclude staging), so only the final normalised SVGs and the
+sources go up.
 
 Idempotency: for each file, the existing Drive file's md5Checksum is
 compared with the local file's md5. Identical files are skipped, so a
@@ -34,12 +33,9 @@ so links do not break), and files deleted locally are NOT deleted on
 Drive (deletion is a deliberate, separate step -- a sync must never
 wipe the pack because of a bad local checkout).
 
-Runs in the sync-pack workflow (manual dispatch, on the branch that
-carries the pack files). Needs the Drive secrets (DRIVE_OAUTH_JSON /
-DRIVE_SERVICE_ACCOUNT_JSON / DRIVE_FOLDER_ID). The pack files reach
-Actions on a temporary branch: they are pushed there, the sync
-workflow uploads them to Drive, and the branch is deleted, so the
-main branch never carries the pack files.
+Needs the Drive secrets (DRIVE_OAUTH_JSON / DRIVE_FOLDER_ID). No
+service account: a service account has no storage quota and cannot
+create files in a personal Drive folder.
 """
 import argparse
 import hashlib
@@ -122,9 +118,8 @@ def sync_pack(pack_dir, drive_subdir, dry_run=False, exclude=()):
     (new, updated, unchanged) counts. `exclude` is a list of path
     prefixes (relative to pack_dir) to skip, e.g. ["staging",
     "tools", "catalog-"] -- anything whose relative path starts with
-    one of them is not uploaded. The catalog, the tools, and the
-    staging intermediates live in the repo, not on Drive, so the
-    sync excludes them; only the asset files and the sources go up.
+    one of them is not uploaded. Only the asset files and the
+    sources go up; the catalog and tools are not in this repo.
 
     Token resilience: the Drive access token lives ~1 hour, and a
     sync of the whole pack takes longer. The refresh that fires when
@@ -184,8 +179,7 @@ def sync_pack(pack_dir, drive_subdir, dry_run=False, exclude=()):
         folder_id = _call(
             lambda s: _ensure_folder(s, base_id, rel_dir, folder_cache))
         for name in sorted(filenames):
-            # SVG files only: the catalog, the tools, and the docs
-            # live in the repo and are never uploaded.
+            # SVG files only.
             if not name.lower().endswith(".svg"):
                 continue
             rel_path = os.path.join(rel_dir, name) if rel_dir else name
@@ -229,7 +223,7 @@ def main():
     parser = argparse.ArgumentParser(
         description="sync the asset pack to Drive (idempotent)")
     parser.add_argument("--pack-dir", default="assets")
-    parser.add_argument("--drive-subdir", default="assets")
+    parser.add_argument("--drive-subdir", default="svg assets")
     parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--exclude", action="append", default=[],
                         help="relative-path prefix to skip (repeatable), "

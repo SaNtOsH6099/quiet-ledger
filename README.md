@@ -60,6 +60,15 @@ GitHub → Actions → `echoes-render` → Run workflow, with:
 `video_id` (e.g. `79`), `drive_folder_id` (the staging folder id),
 `video_title`, `final_name` (e.g. `79-antikythera-mechanism-v1`).
 
+Or from the Hub, with the dispatch script (no secret handled by it):
+
+```bash
+python3 scripts/dispatch_echoes_render.py --video-id 79 \
+  --drive-folder-id <staging folder id> \
+  --video-title "The Antikythera Mechanism" \
+  --final-name 79-antikythera-test-v1
+```
+
 Then: wait for the run, take the final from the staging folder, do local
 frame QA, transfer to Echoes Drop, clean the staging folder.
 

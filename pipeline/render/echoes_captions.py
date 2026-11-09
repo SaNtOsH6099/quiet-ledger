@@ -9,25 +9,21 @@ Inputs:
                     "keyword": "five", "style": "standard",
                     "word_starts": [0.0, 0.4, 0.9, 1.5],
                     "size_px": 70, "bottom_px": 670, "break_after": 2}
-  --project-dir    a HyperFrames caption project (index.html template,
-                   vendored GSAP + Archivo Black font). The local project
-                   lives at ~/workspace/video-tools/echoes-hyperframes/
-                   and is NOT in this repo yet — see PLACEHOLDER below.
+  --project-dir    the HyperFrames caption project in this repo
+                   (echoes-hyperframes/, ported 2026-11-09 from the
+                   local project): index.html template, vendored GSAP
+                   + Archivo Black font, tools/build_captions.py and
+                   tools/render_captions_24fps.sh.
   --out            captions-24fps.mp4 (1080x1920, 24 fps)
 
-PLACEHOLDER — read this before running:
-  The local caption build (tools/build_captions.py, which turns the JSON
+Ported 2026-11-09: the caption project lives in this repo at
+  echoes-hyperframes/ (tools/build_captions.py, which turns the JSON
   into a self-contained HyperFrames composition, and
   tools/render_captions_24fps.sh, which runs
   `npx hyperframes@0.9.2 render . -o renders/captions-24fps.mp4 --fps 24
   --resolution portrait --quality delivery --keyframe-interval 2
-  --low-memory-mode --workers 1`) has NOT been ported into this repo.
-  This script validates the captions JSON now, and fails loudly with a
-  clear message until that port lands. It does NOT invent a caption
-  renderer: the Echoes look (word-by-word pop, gold keyword, safe band
-  at bottom 670-850px, no em dashes, first caption at 0.0s, hold 2s+)
-  lives in build_captions.py, and a re-implementation here would drift
-  from the videos already shipped.
+  --low-memory-mode --workers 1`). This script validates the captions
+  JSON, builds the composition, and renders it at 24 fps.
 
 What this script DOES do today: validate the caption JSON against the
 Echoes rules, so a bad caption file fails here instead of in the render.
@@ -100,22 +96,27 @@ def main():
         captions = json.load(f)
     validate(captions)
 
-    build = os.path.join(args.project_dir, "tools", "build_captions.py")
-    render = os.path.join(args.project_dir, "tools", "render_captions_24fps.sh")
+    # Absolute paths: the render step runs with cwd=project_dir, so a
+    # relative script path would be resolved inside the project dir
+    # and not found (caught by the local 79 test, 2026-11-09).
+    project_dir = os.path.abspath(args.project_dir)
+    build = os.path.join(project_dir, "tools", "build_captions.py")
+    render = os.path.join(project_dir, "tools", "render_captions_24fps.sh")
     if not (os.path.exists(build) and os.path.exists(render)):
         fail(
-            "PLACEHOLDER: HyperFrames caption project not ported yet. "
-            "Port tools/build_captions.py and tools/render_captions_24fps.sh "
-            "from the local project ~/workspace/video-tools/echoes-hyperframes/ "
-            "into this repo (with its vendored font + GSAP), then re-run. "
-            "Captions JSON validated OK; nothing was rendered."
+            "HyperFrames caption project missing: "
+            "echoes-hyperframes/tools/build_captions.py or "
+            "tools/render_captions_24fps.sh not found under "
+            f"{args.project_dir!r}. Captions JSON validated OK; "
+            "nothing was rendered."
         )
     # Ported project present: build the composition, render at 24 fps.
+    os.makedirs(os.path.dirname(os.path.abspath(args.out)), exist_ok=True)
     subprocess.run(
         ["python3", build, args.captions_json,
          os.path.join(args.project_dir, "index.html")], check=True)
-    subprocess.run(["bash", render], check=True, cwd=args.project_dir)
-    rendered = os.path.join(args.project_dir, "renders", "captions-24fps.mp4")
+    subprocess.run(["bash", render], check=True, cwd=project_dir)
+    rendered = os.path.join(project_dir, "renders", "captions-24fps.mp4")
     os.replace(rendered, args.out)
     print(f"wrote {args.out}")
     return 0

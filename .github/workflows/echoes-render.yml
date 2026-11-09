@@ -98,16 +98,17 @@ jobs:
           node-version: "22"
       - name: install Echoes tools
         run: python3 -m pip install -q -r requirements/echoes.txt
+      - name: install ffmpeg (HyperFrames muxes frames with it)
+        timeout-minutes: 10
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg
       - uses: actions/download-artifact@v4
         with:
           name: inputs
           path: in/
       - name: render the captions
-        # PLACEHOLDER: echoes_captions.py validates the captions JSON and
-        # fails loudly until the HyperFrames caption project
-        # (tools/build_captions.py + render_captions_24fps.sh, vendored
-        # font + GSAP) is ported from the local project into this repo.
-        # See that script and docs/ECHOES.md. Do not invent a renderer.
+        # echoes_captions.py validates the captions JSON, builds the
+        # composition from echoes-hyperframes/tools/build_captions.py,
+        # and renders it at 24 fps with render_captions_24fps.sh.
         run: |
           python3 -m pipeline.render.echoes_captions \
             --captions-json in/captions.json \

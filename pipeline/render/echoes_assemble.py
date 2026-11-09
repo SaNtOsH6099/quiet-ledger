@@ -229,7 +229,7 @@ def main():
         "colorbalance=gs=-0.04:bs=0.06:rh=0.04:gh=0.01,"
         "unsharp=5:5:0.5:5:5:0.0,vignette=PI/5,"
         "noise=alls=7:allf=t+u,"
-        f"fade=t=out:st={total:.3f}:d=0.5,format=yuv420p"
+        f"fade=t=out:st={mix_dur:.3f}:d=0.5,format=yuv420p"  # mix end, not timeline total: the last segment may carry 0.5s headroom
     )
     loudnorm = (
         "loudnorm=I=-23:TP=-2:LRA=11:"

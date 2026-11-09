@@ -22,13 +22,11 @@ The per-video staging folder in the quiet-ledger Drive hub holds:
    fetched.
 2. **captions** — `pipeline/render/echoes_captions.py` validates the
    captions JSON (3-5 words, no em dashes, first caption at 0.0s, safe
-   band bottom 670-850px, gold keyword in the text) and renders the
-   HyperFrames karaoke mp4 at 24 fps.
-   **PLACEHOLDER:** the HyperFrames caption project
-   (`tools/build_captions.py`, `tools/render_captions_24fps.sh`, vendored
-   font + GSAP) is not in this repo yet. Until it is ported from the
-   local project, this job fails loudly with a clear message. Do not
-   invent a caption renderer.
+   band bottom 670-850px, gold keyword in the text), builds the
+   composition with `echoes-hyperframes/tools/build_captions.py`, and
+   renders the HyperFrames karaoke mp4 at 24 fps with
+   `echoes-hyperframes/tools/render_captions_24fps.sh` (vendored GSAP
+   + Archivo Black, ported 2026-11-09 from the local project).
 3. **assemble** — `pipeline/render/echoes_assemble.py` (ported from the
    local 24 fps chain, videos 65-78):
    - per segment, blur-fill the (usually landscape) clip to 1080x1920
@@ -73,9 +71,13 @@ The per-video staging folder in the quiet-ledger Drive hub holds:
   index, per-video folders, upload/download, meta.
 - `pipeline/tools/check_no_shadow.py` — stdlib-shadowing guard, run by
   every job.
-- `pipeline/drive/upload_drive.py`, `ingest.py`, `sync_pack.py` — kept
-  but **not used by echoes-render**. `ingest.py` is the old
-  repo-submission flow; `sync_pack.py` syncs the SVG pack to the Drive
-  folder formerly called `assets` (now `svg assets`) and its default
-  subdir name is stale. Do not use either for Echoes until they are
-  updated or deleted.
+- `pipeline/drive/upload_drive.py` — kept, used by the
+  return-to-drive job's meta update path.
+- `pipeline/drive/ingest.py` — **deleted 2026-11-09**: the old
+  repo-submission flow, it imported the deleted
+  `pipeline.validate.scene` and was broken. Echoes intake is
+  `pipeline/drive/echoes_intake.py`.
+- `pipeline/drive/sync_pack.py` — kept, **not used by echoes-render**:
+  syncs the SVG pack to the Drive folder `svg assets` (default
+  updated 2026-11-09, was `assets`). Only for maintaining the pack;
+  Echoes does not use it.

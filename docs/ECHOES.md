@@ -16,7 +16,7 @@ in Echoes Drop, and the staging folder is cleaned.
 | Captions, measured from the locked narration (faster-whisper base + small, compared word-for-word) | Per-video side chat | Local |
 | AI clips, per-clip QC in motion | Per-video side chat | Local |
 | Locked clips + narration + captions.json + segment_map.json + narration-timestamps file into the staging folder | Per-video side chat | Drive: quiet-ledger / `"<id> <topic>"` |
-| Dispatch `echoes-render` | Hub | GitHub Actions |
+| Dispatch `echoes-render` (`scripts/dispatch_echoes_render.py`, or GitHub UI) | Hub | GitHub Actions |
 | Intake, captions render, assembly, cinema finish | GitHub Actions | `echoes-render.yml` |
 | Final returns to the staging folder | GitHub Actions | Drive: quiet-ledger / `"<id> <topic>"` |
 | Local frame QA (frames in motion, joins, golds, safe band, tail) | Hub | Local |
@@ -57,33 +57,43 @@ in Echoes Drop, and the staging folder is cleaned.
   "<id> <topic>"`, video + narration-timestamps file only, new version
   name every time, Drive size verified against local size.
 
-## What is still a placeholder
+## What was done 2026-11-09 (setup completion)
 
-1. **HyperFrames caption project not ported.** `echoes_captions.py`
-   validates the captions JSON and fails loudly until
-   `tools/build_captions.py` + `tools/render_captions_24fps.sh` (plus
-   vendored Archivo Black font + GSAP) are ported from the local
-   project `~/workspace/video-tools/echoes-hyperframes/` into this
-   repo. No caption renderer has been invented in their place.
-2. **Secrets not verified.** `DRIVE_OAUTH_JSON` + `DRIVE_FOLDER_ID`
-   are ticked as set up in the old checklist, but the PAT cannot list
-   repo secrets (403). Verify with a real dispatch, not by listing
-   them. `DRIVE_SERVICE_ACCOUNT_JSON` is not used and should be
-   removed from repo secrets, along with the old Groq/Gemini/NVIDIA
-   keys the old checklist says are unused.
-3. **No end-to-end test yet.** Test one completed video (e.g. 79,
-   re-rendered from its locked clips in a test staging folder) before
-   switching the live batch over. Do not switch the live batch
-   (79 is in progress, sequential) until that test passes.
-4. **Old Drive helpers kept, unused:** `pipeline/drive/ingest.py`
-   (repo-submission flow) and `sync_pack.py` (SVG pack sync, default
-   subdir still `assets`, now renamed `svg assets`). Update or delete
-   them; do not use them for Echoes as they stand.
-5. **Repo visibility:** public. That gives the free unlimited standard
+1. **HyperFrames caption project ported.** `echoes-hyperframes/`
+   in this repo: `tools/build_captions.py`,
+   `tools/render_captions_24fps.sh`, vendored GSAP + Archivo Black,
+   `meta.json` / `package.json` / `hyperframes.json`. `echoes_captions.py`
+   builds the composition and renders it at 24 fps; the placeholder
+   fail is gone. Tested locally on the 79 captions and end-to-end in
+   Actions (see the test run in the Hub report for this date).
+2. **Stale files resolved.** `pipeline/drive/ingest.py` deleted (old
+   repo-submission flow, broken — it imported the deleted
+   `pipeline.validate.scene`). `pipeline/drive/sync_pack.py` kept for
+   the SVG pack only, default Drive subdir updated to `svg assets`.
+   `SETUP-CHECKLIST.md` rewritten for Echoes.
+3. **Dispatch script added.** `scripts/dispatch_echoes_render.py`
+   dispatches the workflow via the GitHub API (custom.github-pat);
+   it handles no secret itself.
+4. **End-to-end test.** One completed video (79, re-rendered from
+   its locked clips in a test staging folder) was rendered in Actions
+   before the live batch was switched over — see the Hub report for
+   the test run id and verification numbers.
+
+## What is still open
+
+1. **Secrets.** `DRIVE_OAUTH_JSON` + `DRIVE_FOLDER_ID` were verified
+   by the successful end-to-end test dispatch. `DRIVE_SERVICE_ACCOUNT_JSON`
+   is not used and should be removed from repo secrets, along with the
+   old Groq/Gemini/NVIDIA keys — the PAT cannot list or remove secrets
+   (403), so that step needs the user in the GitHub UI.
+2. **Repo visibility:** public. That gives the free unlimited standard
    runners (4 vCPU / 16 GB, 20 concurrent jobs). Everything in the
    repo is public, so no clips, narration, scripts or timestamps ever
    go into the repo — Drive only. Private would drop to 2 vCPU / ~7 GB
    and 2,000 free minutes a month.
+3. **Live batch not switched over yet.** The test proved the render
+   chain; switching the batch (80 onward) to the parallel/GitHub
+   flow is a separate user decision.
 
 ## What was cleaned out (2026-11-09)
 
