@@ -46,9 +46,11 @@ on:
 permissions:
   contents: read
 
-concurrency:
-  group: echoes-render
-  cancel-in-progress: false
+# No concurrency limit: each run works only in its own per-video Drive
+# staging folder with its own artifacts, so runs do not share anything
+# and can safely run in parallel. The old limit (one run at a time,
+# one pending) made GitHub cancel older queued runs when a newer
+# dispatch arrived — that cancelled 83 and 81 in Group A on 2026-11-10.
 
 jobs:
   intake:
