@@ -1,3 +1,0 @@
--r base.txt
-rapidocr-onnxruntime
-opencv-python-headless
