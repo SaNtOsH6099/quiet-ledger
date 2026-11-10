@@ -23,6 +23,11 @@
 # video_title. No schedule, no repo submission.
 name: echoes-render
 
+# The run list shows this name instead of just "echoes-render #19",
+# so each run is identifiable by video: "Echoes 94 — The Bridgewater
+# Triangle". Applies to new runs only; past runs keep their old names.
+run-name: "Echoes ${{ inputs.video_id }} — ${{ inputs.video_title }}"
+
 on:
   workflow_dispatch:
     inputs:
