@@ -140,6 +140,12 @@ def main():
     parser.add_argument("--work-dir", default="work/assemble")
     args = parser.parse_args()
 
+    # The final encode writes to --out (usually out/<final>.mp4). When the
+    # captions job is skipped there is no captions artifact download to
+    # create out/ first, so make it here — otherwise ffmpeg fails with
+    # "Error opening output ... No such file or directory" at the finish.
+    os.makedirs(os.path.dirname(os.path.abspath(args.out)), exist_ok=True)
+
     with open(args.segment_map) as f:
         segments = json.load(f)
     if not segments:
