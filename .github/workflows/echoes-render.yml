@@ -47,6 +47,11 @@ on:
         description: "Final filename (no extension), e.g. 79-antikythera-mechanism-v1"
         required: true
         type: string
+      skip_captions:
+        description: "Skip the captions render and overlay (caption-free full video)"
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -92,6 +97,7 @@ jobs:
 
   captions:
     name: HyperFrames karaoke captions, 24 fps
+    if: ${{ !inputs.skip_captions }}
     needs: intake
     runs-on: ubuntu-latest
     timeout-minutes: 120
@@ -130,7 +136,12 @@ jobs:
 
   assemble:
     name: assemble + cinema finish, 24 fps, -23 LUFS
-    needs: captions
+    needs: [intake, captions]
+    # The captions job is skipped when skip_captions is true; a needed
+    # job that is skipped would normally skip this job too, so run
+    # whenever intake succeeded and captions either succeeded or was
+    # skipped on purpose.
+    if: ${{ always() && needs.intake.result == 'success' && (inputs.skip_captions || needs.captions.result == 'success') }}
     runs-on: ubuntu-latest
     timeout-minutes: 360
     steps:
@@ -146,17 +157,26 @@ jobs:
           name: inputs
           path: in/
       - uses: actions/download-artifact@v4
+        if: ${{ !inputs.skip_captions }}
         with:
           name: captions
           path: out/
       - name: assemble and finish
         run: |
-          python3 -m pipeline.render.echoes_assemble \
-            --segments-dir in/clips \
-            --segment-map in/segment_map.json \
-            --captions out/captions-24fps.mp4 \
-            --audio in/narration_mix.wav \
-            --out "out/${{ inputs.final_name }}.mp4"
+          if [ "${{ inputs.skip_captions }}" = "true" ]; then
+            python3 -m pipeline.render.echoes_assemble \
+              --segments-dir in/clips \
+              --segment-map in/segment_map.json \
+              --audio in/narration_mix.wav \
+              --out "out/${{ inputs.final_name }}.mp4"
+          else
+            python3 -m pipeline.render.echoes_assemble \
+              --segments-dir in/clips \
+              --segment-map in/segment_map.json \
+              --captions out/captions-24fps.mp4 \
+              --audio in/narration_mix.wav \
+              --out "out/${{ inputs.final_name }}.mp4"
+          fi
       - name: record size, duration, loudness
         run: |
           python3 - <<'PY'

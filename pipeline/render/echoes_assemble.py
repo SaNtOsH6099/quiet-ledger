@@ -132,8 +132,9 @@ def main():
         description="assemble an Echoes short from locked clips")
     parser.add_argument("--segments-dir", required=True)
     parser.add_argument("--segment-map", required=True)
-    parser.add_argument("--captions", required=True,
-                        help="captions-24fps.mp4 (HyperFrames, 24 fps)")
+    parser.add_argument("--captions", required=False, default=None,
+                        help="captions-24fps.mp4 (HyperFrames, 24 fps); "
+                             "omit for a caption-free render")
     parser.add_argument("--audio", required=True, help="narration mix wav")
     parser.add_argument("--out", required=True)
     parser.add_argument("--work-dir", default="work/assemble")
@@ -241,16 +242,23 @@ def main():
     tailed_dur = probe(tailed)["duration"]
 
     composited = os.path.join(args.work_dir, "composite.mp4")
-    cap_pad = tailed_dur - probe(args.captions)["duration"]
-    run(["ffmpeg", "-y", "-v", "error",
-         "-i", tailed, "-i", args.captions,
-         "-filter_complex",
-         f"[1:v]tpad=stop_duration={max(cap_pad, 0):.3f}:stop_mode=clone,"
-         "fps=24[cap];[0:v]format=gbrp[v0];[cap]format=gbrp[cap2];"
-         "[v0][cap2]blend=all_mode=screen,format=yuv420p,fps=24[v]",
-         "-map", "[v]", "-map", "0:a",
-         "-c:v", "libx264", "-crf", "18", "-preset", "medium",
-         "-c:a", "copy", "-r", "24", composited])
+    if args.captions:
+        cap_pad = tailed_dur - probe(args.captions)["duration"]
+        run(["ffmpeg", "-y", "-v", "error",
+             "-i", tailed, "-i", args.captions,
+             "-filter_complex",
+             f"[1:v]tpad=stop_duration={max(cap_pad, 0):.3f}:stop_mode=clone,"
+             "fps=24[cap];[0:v]format=gbrp[v0];[cap]format=gbrp[cap2];"
+             "[v0][cap2]blend=all_mode=screen,format=yuv420p,fps=24[v]",
+             "-map", "[v]", "-map", "0:a",
+             "-c:v", "libx264", "-crf", "18", "-preset", "medium",
+             "-c:a", "copy", "-r", "24", composited])
+    else:
+        # Caption-free render: the tailed chain IS the composite.
+        # No overlay, no captions video needed.
+        print("no --captions: caption-free render, skipping overlay")
+        run(["ffmpeg", "-y", "-v", "error", "-i", tailed,
+             "-c", "copy", composited])
 
     # Two-pass loudnorm: measure, then finish with measured values.
     measured = measure_loudness(composited)

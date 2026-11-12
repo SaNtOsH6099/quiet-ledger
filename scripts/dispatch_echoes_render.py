@@ -59,6 +59,9 @@ def main():
     parser.add_argument("--final-name", required=True,
                         help="final filename without extension, "
                              "e.g. 79-antikythera-test-v1")
+    parser.add_argument("--skip-captions", action="store_true",
+                        help="caption-free render: skip the captions "
+                             "job and overlay")
     args = parser.parse_args()
 
     res = gh("POST",
@@ -67,7 +70,9 @@ def main():
               "inputs": {"video_id": args.video_id,
                          "drive_folder_id": args.drive_folder_id,
                          "video_title": args.video_title,
-                         "final_name": args.final_name}})
+                         "final_name": args.final_name,
+                         "skip_captions": ("true" if args.skip_captions
+                                           else "false")}})
     print("dispatched echoes-render on main:", res or "OK")
     print("watch: https://github.com/SaNtOsH6099/quiet-ledger/"
           "actions/workflows/echoes-render.yml")
