@@ -163,6 +163,10 @@ jobs:
           path: out/
       - name: assemble and finish
         run: |
+          # out/ must exist before ffmpeg writes the final: in the
+          # captioned path the captions-artifact download creates it,
+          # but when skip_captions skips that download nothing does.
+          mkdir -p out
           if [ "${{ inputs.skip_captions }}" = "true" ]; then
             python3 -m pipeline.render.echoes_assemble \
               --segments-dir in/clips \
