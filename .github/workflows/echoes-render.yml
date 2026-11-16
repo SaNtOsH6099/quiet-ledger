@@ -174,10 +174,18 @@ jobs:
               --audio in/narration_mix.wav \
               --out "out/${{ inputs.final_name }}.mp4"
           else
+            # Hormozi captions produce a plates file alongside the text
+            # layer; legacy captions do not — pass it only when it
+            # exists, so legacy renders keep working unchanged.
+            PLATES_ARG=""
+            if [ -f out/captions-plates-24fps.mp4 ]; then
+              PLATES_ARG="--captions-plates out/captions-plates-24fps.mp4"
+            fi
             python3 -m pipeline.render.echoes_assemble \
               --segments-dir in/clips \
               --segment-map in/segment_map.json \
               --captions out/captions-24fps.mp4 \
+              $PLATES_ARG \
               --audio in/narration_mix.wav \
               --out "out/${{ inputs.final_name }}.mp4"
           fi
