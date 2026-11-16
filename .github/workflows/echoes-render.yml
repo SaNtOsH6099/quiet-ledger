@@ -224,7 +224,6 @@ jobs:
     # always() — without this, return-to-drive was skipped on every
     # no-captions run even though assemble succeeded, and the final
     # only existed as the run artifact.
-    if: ${{ always() && needs.assemble.result == 'success' }}
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
