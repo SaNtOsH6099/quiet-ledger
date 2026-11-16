@@ -19,6 +19,12 @@ per-video Drive folder in quiet-ledger, fetched by echoes_intake.py):
   --captions      captions-24fps.mp4 from echoes_captions.py (HyperFrames
                     karaoke, 1080x1920, 24 fps, black background, white
                     text, gold keywords)
+  --captions-plates
+                    captions-plates-24fps.mp4 from echoes_captions.py
+                    (Hormozi only: white background, dark per-word
+                    plates). Multiplied onto the footage BEFORE the text
+                    layer is screened on top. Omit for legacy captions
+                    (no plates file exists) and for caption-free renders.
   --audio         narration mix wav (Gemini Kore, one take, -23 LUFS mix)
   --out           final mp4
 
@@ -40,6 +46,13 @@ Steps:
      turns magenta, so both inputs are converted to RGB (format=gbrp)
      before blend=all_mode=screen, then back to yuv420p. Screen blend
      makes the caption video's black background disappear.
+     Hormozi: the plate video (white background, dark per-word plates)
+     is multiplied onto the footage FIRST — multiply makes its white
+     background disappear and darkens the footage under each plate —
+     then the text layer is screened on top:
+     [v0][plate2]blend=all_mode=multiply[vm];
+     [vm][cap2]blend=all_mode=screen. The plate video is tpad-padded
+     to the tailed length exactly like the text layer.
   5. Measure the composite's loudness (no -v error: the Parsed_loudnorm
      JSON prints at INFO level and -v error suppresses it).
   6. Cinema finish, in the final encode: hqdn3d denoise, eq grade,
@@ -135,10 +148,23 @@ def main():
     parser.add_argument("--captions", required=False, default=None,
                         help="captions-24fps.mp4 (HyperFrames, 24 fps); "
                              "omit for a caption-free render")
+    parser.add_argument("--captions-plates", required=False, default=None,
+                        help="captions-plates-24fps.mp4 (Hormozi only); "
+                             "multiplied onto the footage before the text "
+                             "layer is screened on top; omit for legacy "
+                             "captions (no plates file exists)")
     parser.add_argument("--audio", required=True, help="narration mix wav")
     parser.add_argument("--out", required=True)
     parser.add_argument("--work-dir", default="work/assemble")
     args = parser.parse_args()
+
+    if args.captions_plates and not args.captions:
+        raise SystemExit("--captions-plates given without --captions: "
+                         "plates need the caption text layer")
+    if args.captions_plates and not os.path.exists(args.captions_plates):
+        raise SystemExit(f"--captions-plates file not found: "
+                         f"{args.captions_plates} (legacy captions produce "
+                         f"no plates file — omit the argument instead)")
 
     # The final encode writes to --out (usually out/<final>.mp4). When the
     # captions job is skipped there is no captions artifact download to
@@ -250,12 +276,28 @@ def main():
     composited = os.path.join(args.work_dir, "composite.mp4")
     if args.captions:
         cap_pad = tailed_dur - probe(args.captions)["duration"]
-        run(["ffmpeg", "-y", "-v", "error",
-             "-i", tailed, "-i", args.captions,
-             "-filter_complex",
-             f"[1:v]tpad=stop_duration={max(cap_pad, 0):.3f}:stop_mode=clone,"
-             "fps=24[cap];[0:v]format=gbrp[v0];[cap]format=gbrp[cap2];"
-             "[v0][cap2]blend=all_mode=screen,format=yuv420p,fps=24[v]",
+        inputs = ["-i", tailed, "-i", args.captions]
+        fc = (f"[1:v]tpad=stop_duration={max(cap_pad, 0):.3f}:stop_mode=clone,"
+              "fps=24[cap];[0:v]format=gbrp[v0];[cap]format=gbrp[cap2];")
+        if args.captions_plates:
+            # Hormozi plates: white background, dark per-word plates.
+            # Multiply first (white disappears, footage darkens under
+            # each plate), then screen the text on top. Same tpad pad
+            # to the tailed length as the text layer.
+            plate_pad = tailed_dur - probe(args.captions_plates)["duration"]
+            inputs += ["-i", args.captions_plates]
+            fc += (f"[2:v]tpad=stop_duration={max(plate_pad, 0):.3f}:"
+                   "stop_mode=clone,fps=24[plate];"
+                   "[plate]format=gbrp[plate2];"
+                   "[v0][plate2]blend=all_mode=multiply[vm];"
+                   "[vm][cap2]blend=all_mode=screen,format=yuv420p,fps=24[v]")
+            print(f"compositing plates {args.captions_plates} "
+                  f"(pad {max(plate_pad, 0):.3f}s) under captions")
+        else:
+            fc += ("[v0][cap2]blend=all_mode=screen,"
+                   "format=yuv420p,fps=24[v]")
+        run(["ffmpeg", "-y", "-v", "error", *inputs,
+             "-filter_complex", fc,
              "-map", "[v]", "-map", "0:a",
              "-c:v", "libx264", "-crf", "18", "-preset", "medium",
              "-c:a", "copy", "-r", "24", composited])
