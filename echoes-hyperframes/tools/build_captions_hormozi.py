@@ -261,7 +261,15 @@ def main():
         # follow it; seeing the whole phrase up front lets the viewer
         # read ahead while the highlight tracks the narration. The
         # hook keeps its punchy word-by-word pop (passed in the demo).
-        is_fast = cap.get("style") == "body" and (end - start) / len(words) < 0.25
+        # EXPLICIT OVERRIDE (67, Gate 1 red team 2026-11-17): a body
+        # phrase can also carry "mode": "show-all" in the JSON. The
+        # 0.25s/word heuristic is a trigger, not the whole rule — a
+        # phrase at 203 wpm (0.295s/word) is still too fast for
+        # word-by-word pop, and the reviewer for that video said so.
+        # The validator ignores the extra key, so the file still
+        # validates; the render honours it here and in the local build.
+        is_fast = cap.get("style") == "body" and (
+            (end - start) / len(words) < 0.25 or cap.get("mode") == "show-all")
         for j in range(len(words)):
             t = word_starts[j]
             pop_t = start if is_fast else t
