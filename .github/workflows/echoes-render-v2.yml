@@ -140,11 +140,20 @@ jobs:
         # --mix is required: the audit runs on the locked narration
         # mix (in/narration_mix.wav, fetched by intake) and a mistimed
         # word fails the build here, not at Gate 3.
+        # --date-cards is optional: when the staging folder holds a
+        # date_cards.json (Director-plan date cards, a locked Gate 3
+        # element), the cards are injected into BOTH caption layers
+        # before the render; without it a GitHub render silently drops
+        # them (69 Gate 4). Videos without cards stage no such file
+        # and render exactly as before.
         run: |
+          DC_ARG=""
+          if [ -f in/date_cards.json ]; then DC_ARG="--date-cards in/date_cards.json"; fi
           python3 -m pipeline-v2.render.echoes_captions_v2 \
             --captions-json in/captions.json \
             --project-dir echoes-hyperframes-v2 \
             --mix in/narration_mix.wav \
+            $DC_ARG \
             --out out/captions-24fps.mp4
       - uses: actions/upload-artifact@v4
         with:
