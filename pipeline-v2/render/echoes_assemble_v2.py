@@ -29,6 +29,19 @@ audit gap in AUDIT.md):
      Until the smooth method is worked out and verified numerically
      and by eye, a Ken Burns segment must arrive as a pre-rendered
      mp4 (generated clip) or as a plain still beat.
+  FRAME-PINNED ENCODE + CONCAT (mini-test run 2 fix, 2026-11-18):
+     the segment encode used "-t {dur}" with an fps=24 filter, and
+     the concat used "-f concat -c copy". Both are version-sensitive:
+     on the mini test "-t 0.520" dropped the tail clip's 13th frame
+     (at 0.5s) on local ffmpeg 8.1.2, and the GitHub runner's ffmpeg
+     6.1.1 lost 2 more frames somewhere in the chain — the concat
+     came out 19.29s against a 19.40s mix and the G5 guard stopped
+     the run. The encode now pins the frame count with "-frames:v N"
+     (N = round(dur * 24)) and the concat re-encodes through the
+     concat filter, so the chain's frame count is exactly the sum of
+     the segment frames on any ffmpeg version — no -t boundary
+     rounding, no demuxer gap-fill. The 0.05s shortfall pad stays as
+     the quantisation tolerance only.
 
 This follows the local 24 fps chain used for videos 65-78 (see
 ~/workspace/video-tools/antikythera-79/work/assemble_clean.sh and
@@ -61,14 +74,16 @@ Steps:
   1. Per segment, blur-fill to 1080x1920 (background scale-to-cover +
      gblur sigma=40 + brightness -0.25; foreground centred at width
      1080, height from the clip's aspect, y = (1920 - fg_h) / 2),
-     trimmed to its duration, CRF 18, preset medium, 24 fps. If a
-     segment is longer than its clip, FAIL loudly (G5 — no silent
-     hold; re-type as a still beat or re-cut). A still-image segment
-     is looped for its duration (G3).
-  2. Concat the trimmed segments, and GUARD: concat must be >= the
-     narration mix, or -shortest would truncate the narration. Fail
-     loudly here, do not mux a short chain. A shortfall of at most
-     0.05s (frame quantisation) is padded; anything more fails (G5).
+     frame-pinned to round(dur * 24) frames, CRF 18, preset medium,
+     24 fps. If a segment is longer than its clip, FAIL loudly (G5 —
+     no silent hold; re-type as a still beat or re-cut). A still-image
+     segment is looped for its frame count (G3).
+  2. Concat the trimmed segments through the concat filter
+     (re-encode, so the frame count is exactly the sum of the
+     segments), and GUARD: concat must be >= the narration mix, or
+     -shortest would truncate the narration. Fail loudly here, do not
+     mux a short chain. A shortfall of at most 0.05s (frame
+     quantisation) is padded; anything more fails (G5).
   3. Mux the narration (-shortest cuts at the mix length), then a 0.5s
      tail: audio apad 0.5 + video tpad clone 0.5, so the last word is
      actually heard.
@@ -216,6 +231,30 @@ def blur_fill_filter(width, height):
     )
 
 
+def concat_segments(trimmed, out):
+    """Join the encoded segments with the concat FILTER (re-encode).
+
+    NOT "-f concat -c copy": the concat demuxer fills timestamp gaps
+    between files by duplicating frames (local ffmpeg 8.1.2 turned
+    465 segment frames into a 466-frame concat) or drops frames
+    (GitHub ffmpeg 6.1.1 turned the same chain into 463) — the frame
+    count is version-dependent. The concat filter passes the frame
+    streams through, so the total is exactly the sum of the segment
+    frames on any ffmpeg version. All segments are 1080x1920
+    yuv420p 24 fps by construction, so the filter takes them directly.
+    """
+    inputs = []
+    for p in trimmed:
+        inputs += ["-i", p]
+    filt = "".join(f"[{k}:v]" for k in range(len(trimmed)))
+    filt += (f"concat=n={len(trimmed)}:v=1:a=0,"
+             "fps=24,format=yuv420p[v]")
+    run(["ffmpeg", "-y", "-v", "error", *inputs,
+         "-filter_complex", filt, "-map", "[v]",
+         "-c:v", "libx264", "-crf", "18", "-preset", "medium",
+         "-an", out])
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="assemble an Echoes short from locked clips")
@@ -276,6 +315,9 @@ def main():
         dur = float(seg["end"]) - float(seg["start"])
         if dur <= 0:
             raise SystemExit(f"segment {i} ({seg['file']}): bad duration {dur}")
+        # FRAME-PIN: the encode's frame count is pinned, not left to
+        # "-t" + fps boundary rounding (see module docstring).
+        nframes = max(1, round(dur * 24))
         if seg.get("kenburns"):
             # KEN BURNS GUARD: the smooth method is UNSOLVED. Never
             # ffmpeg zoompan (vibrates on fine detail, 58 Gap1). A
@@ -292,10 +334,15 @@ def main():
             info = probe(src)
             run(["ffmpeg", "-y", "-v", "error",
                  "-loop", "1", "-framerate", "24", "-i", src,
-                 "-t", f"{dur:.3f}",
+                 "-frames:v", str(nframes),
                  "-filter_complex", blur_fill_filter(info["width"], info["height"]),
                  "-r", "24", "-an",
                  "-c:v", "libx264", "-crf", "18", "-preset", "medium", out])
+            got = probe_frames(out)
+            if got != nframes:
+                raise SystemExit(
+                    f"segment {i} ({seg['file']}): still beat encoded "
+                    f"{got} frames, expected {nframes} — frame pin failed")
             print(f"segment {i}: still beat {seg['file']} held {dur:.3f}s")
             trimmed.append(out)
             continue
@@ -317,20 +364,24 @@ def main():
                 f"({info['duration']:.2f}s) — re-type as a still beat "
                 f"or re-cut; no silent hold")
         # Trim from the START of this clip, for the segment duration.
+        # -frames:v pins the count (see module docstring); -t does not.
+        src_frames = probe_frames(src)
         run(["ffmpeg", "-y", "-v", "error", "-i", src,
-             "-t", f"{dur:.3f}",
+             "-frames:v", str(nframes),
              "-filter_complex", blur_fill_filter(info["width"], info["height"]),
              "-r", "24", "-an",
              "-c:v", "libx264", "-crf", "18", "-preset", "medium", out])
+        got = probe_frames(out)
+        expect = min(src_frames, nframes)
+        if got > nframes or got < expect - 1:
+            raise SystemExit(
+                f"segment {i} ({seg['file']}): encoded {got} frames, "
+                f"expected {expect} (clip {src_frames}f, window "
+                f"{nframes}f) — frame pin failed")
         trimmed.append(out)
 
-    concat_list = os.path.join(args.work_dir, "concat.txt")
-    with open(concat_list, "w") as f:
-        for p in trimmed:
-            f.write(f"file '{os.path.abspath(p)}'\n")
     silent = os.path.join(args.work_dir, "silent.mp4")
-    run(["ffmpeg", "-y", "-v", "error", "-f", "concat", "-safe", "0",
-         "-i", concat_list, "-c", "copy", silent])
+    concat_segments(trimmed, silent)
     concat_dur = probe(silent)["duration"]
     print(f"concat {concat_dur:.2f}s (mix {mix_dur:.2f}s)")
     if concat_dur < mix_dur:
@@ -341,7 +392,7 @@ def main():
         # a real sync problem: hold the last frame of the last segment
         # (same tpad hold used above for clips shorter than their
         # segment) until the chain reaches the mix, then re-concat.
-        # A shortfall over 1.0s is still a real problem — stop.
+        # A shortfall over 0.05s is still a real problem — stop.
         shortfall = mix_dur - concat_dur
         if shortfall > 0.05:
             # v2 (G5): the v1 code silently padded shortfalls up to
@@ -361,11 +412,7 @@ def main():
              "-r", "24", "-an",
              "-c:v", "libx264", "-crf", "18", "-preset", "medium", padded])
         trimmed[-1] = padded
-        with open(concat_list, "w") as f:
-            for p in trimmed:
-                f.write(f"file '{os.path.abspath(p)}'\n")
-        run(["ffmpeg", "-y", "-v", "error", "-f", "concat", "-safe", "0",
-             "-i", concat_list, "-c", "copy", silent])
+        concat_segments(trimmed, silent)
         concat_dur = probe(silent)["duration"]
         print(f"concat padded +{pad:.3f}s -> {concat_dur:.2f}s "
               f"(mix {mix_dur:.2f}s)")
