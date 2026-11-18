@@ -42,6 +42,18 @@ audit gap in AUDIT.md):
      the segment frames on any ffmpeg version — no -t boundary
      rounding, no demuxer gap-fill. The 0.05s shortfall pad stays as
      the quantisation tolerance only.
+  NO fps FILTER ANYWHERE (mini-test run 3 fix, 2026-11-18): run 3
+     used the frame pin and STILL came out 19.29s. Reproduced
+     locally with ffmpeg 6.1.1 (the version the GitHub runner apt-
+     installs): the fps=24 filter in the blur-fill chain drops the
+     LAST frame of a 213f input (212 out) and of a 240f input (239
+     out) — 212+239+12 = 463f = 19.29s, exactly the GitHub number.
+     ffmpeg 8.1.2 does not drop it. So the fps filter is the root
+     cause, not the concat: every fps=24 filter is REMOVED from this
+     script (segment encode, concat, tpad pad, tail, composite) and
+     the rate is pinned by the "-r 24" output option instead, which
+     does not drop frames. Any future fps filter here must be
+     re-proven against ffmpeg 6.1.1, not just the local build.
 
 This follows the local 24 fps chain used for videos 65-78 (see
 ~/workspace/video-tools/antikythera-79/work/assemble_clean.sh and
@@ -227,7 +239,7 @@ def blur_fill_filter(width, height):
         "[0:v]scale=1080:1920:force_original_aspect_ratio=increase,"
         "crop=1080:1920,gblur=sigma=40,eq=brightness=-0.25[bg];"
         f"[0:v]scale=1080:{fg_h}[fg];"
-        f"[bg][fg]overlay=(W-w)/2:{fg_y},fps=24,format=yuv420p"
+        f"[bg][fg]overlay=(W-w)/2:{fg_y},format=yuv420p"
     )
 
 
@@ -248,11 +260,11 @@ def concat_segments(trimmed, out):
         inputs += ["-i", p]
     filt = "".join(f"[{k}:v]" for k in range(len(trimmed)))
     filt += (f"concat=n={len(trimmed)}:v=1:a=0,"
-             "fps=24,format=yuv420p[v]")
+             "format=yuv420p[v]")
     run(["ffmpeg", "-y", "-v", "error", *inputs,
          "-filter_complex", filt, "-map", "[v]",
          "-c:v", "libx264", "-crf", "18", "-preset", "medium",
-         "-an", out])
+         "-r", "24", "-an", out])
 
 
 def main():
@@ -408,7 +420,7 @@ def main():
         last = trimmed[-1]
         padded = os.path.join(args.work_dir, "seg_last_padded.mp4")
         run(["ffmpeg", "-y", "-v", "error", "-i", last,
-             "-vf", f"tpad=stop_duration={pad:.3f}:stop_mode=clone,fps=24",
+             "-vf", f"tpad=stop_duration={pad:.3f}:stop_mode=clone",
              "-r", "24", "-an",
              "-c:v", "libx264", "-crf", "18", "-preset", "medium", padded])
         trimmed[-1] = padded
@@ -430,7 +442,7 @@ def main():
     run(["ffmpeg", "-y", "-v", "error", "-i", with_audio,
          "-filter_complex",
          "[0:a]apad=pad_dur=0.5[a];"
-         "[0:v]tpad=stop_duration=0.5:stop_mode=clone,fps=24[v]",
+         "[0:v]tpad=stop_duration=0.5:stop_mode=clone[v]",
          "-map", "[v]", "-map", "[a]",
          "-c:v", "libx264", "-crf", "18", "-preset", "medium",
          "-c:a", "aac", "-b:a", "192k", "-r", "24", tailed])
@@ -483,11 +495,11 @@ def main():
             inputs += ["-i", plate_ext]
             fc += ("[2:v]format=gbrp[plate2];"
                    "[v0][plate2]blend=all_mode=multiply[vm];"
-                   "[vm][cap2]blend=all_mode=screen,format=yuv420p,fps=24[v]")
+                   "[vm][cap2]blend=all_mode=screen,format=yuv420p[v]")
             print(f"compositing plates {args.captions_plates} under captions")
         else:
             fc += ("[v0][cap2]blend=all_mode=screen,"
-                   "format=yuv420p,fps=24[v]")
+                   "format=yuv420p[v]")
         run(["ffmpeg", "-y", "-v", "error", *inputs,
              "-filter_complex", fc,
              "-map", "[v]", "-map", "0:a",
