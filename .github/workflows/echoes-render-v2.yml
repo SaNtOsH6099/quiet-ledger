@@ -1,0 +1,297 @@
+# echoes-render-v2: the MODIFIED-pipeline render track (DRAFT — not yet
+# tested in Actions). Same shape as echoes-render (v1), separate folder
+# (pipeline-v2/ + echoes-hyperframes-v2/) so v1 stays untouched and
+# switching is per video at dispatch: dispatch this workflow for a v2
+# video, echoes-render for a v1 video — or both on the same video for
+# comparison. See pipeline-v2/README.md (in the draft) for the audit
+# gaps this track closes and the one it cannot (Ken Burns: UNSOLVED,
+# the assemble step FAILS LOUDLY on any Ken Burns segment — never
+# zoompan).
+#
+# What this workflow does NOT do (same as v1):
+#   - no narration (Gemini Kore, made locally by the side chat)
+#   - no code scenes, no GSAP, no Kokoro, no thumbnail, no .ass
+#   - no QA: frame QA is local, by the Hub, after the render returns
+#   - no transfer to Echoes Drop and no clean-up of the staging folder:
+#     those are Hub steps after QA passes (see docs/ECHOES.md)
+# The finished video comes back to the SAME staging folder in
+# quiet-ledger. The Hub then transfers the final + narration-timestamps
+# file to Echoes Drop and cleans the staging folder.
+#
+# Trigger: manual dispatch only, with video_id, drive_folder_id and
+# video_title. No schedule, no repo submission.
+name: echoes-render-v2
+
+# The run list shows this name instead of just "echoes-render #19",
+# so each run is identifiable by video: "Echoes 94 — The Bridgewater
+# Triangle". Applies to new runs only; past runs keep their old names.
+run-name: "Echoes v2 ${{ inputs.video_id }} — ${{ inputs.video_title }}"
+
+on:
+  workflow_dispatch:
+    inputs:
+      video_id:
+        description: "Video id, e.g. 79"
+        required: true
+        type: string
+      drive_folder_id:
+        description: "Per-video staging folder id in the quiet-ledger Drive hub"
+        required: true
+        type: string
+      video_title:
+        description: "Video title, e.g. The Antikythera Mechanism"
+        required: true
+        type: string
+      final_name:
+        description: "Final filename (no extension), e.g. 79-antikythera-mechanism-v1"
+        required: true
+        type: string
+      skip_captions:
+        description: "Skip the captions render and overlay (caption-free full video)"
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+# No concurrency limit: each run works only in its own per-video Drive
+# staging folder with its own artifacts, so runs do not share anything
+# and can safely run in parallel. The old limit (one run at a time,
+# one pending) made GitHub cancel older queued runs when a newer
+# dispatch arrived — that cancelled 83 and 81 in Group A on 2026-11-10.
+
+jobs:
+  intake:
+    # Shared with v1: intake is input handling, not render behaviour —
+    # it downloads the staging folder (clips, captions.json,
+    # segment_map.json, narration wav, timestamps). The v2 render code
+    # lives in pipeline-v2/ + echoes-hyperframes-v2/; the Drive hub
+    # code (pipeline/drive/) is shared infrastructure.
+    name: intake locked clips from Drive
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    outputs:
+      has_inputs: ${{ steps.intake.outputs.has_inputs }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: reject stdlib-shadowing filenames
+        run: python3 -m pipeline.tools.check_no_shadow
+      - name: install Drive tools
+        run: python3 -m pip install -q -r requirements/drive.txt
+      - name: fetch the locked inputs
+        id: intake
+        env:
+          DRIVE_OAUTH_JSON: ${{ secrets.DRIVE_OAUTH_JSON }}
+          DRIVE_FOLDER_ID: ${{ secrets.DRIVE_FOLDER_ID }}
+        run: |
+          python3 -m pipeline.drive.echoes_intake \
+            --drive-folder-id "${{ inputs.drive_folder_id }}" \
+            --out-dir in/
+          echo "has_inputs=true" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: inputs
+          path: in/
+          if-no-files-found: error
+          retention-days: 7
+
+  captions:
+    name: HyperFrames karaoke captions, 24 fps
+    if: ${{ !inputs.skip_captions }}
+    needs: intake
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: install Echoes tools
+        run: python3 -m pip install -q -r requirements/echoes.txt
+      - name: install ffmpeg (HyperFrames muxes frames with it)
+        timeout-minutes: 10
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg
+      - uses: actions/download-artifact@v4
+        with:
+          name: inputs
+          path: in/
+      - name: render the captions
+        # echoes_captions_v2.py validates the captions JSON (incl.
+        # lesson-43 check 6), builds the composition from
+        # echoes-hyperframes-v2/tools/build_captions_hormozi.py (the
+        # SYNCED local builder, with the lesson-41 pause audit), and
+        # renders it at 24 fps with render_captions_24fps.sh.
+        # --mix is required: the audit runs on the locked narration
+        # mix (in/narration_mix.wav, fetched by intake) and a mistimed
+        # word fails the build here, not at Gate 3.
+        run: |
+          python3 -m pipeline-v2.render.echoes_captions_v2 \
+            --captions-json in/captions.json \
+            --project-dir echoes-hyperframes-v2 \
+            --mix in/narration_mix.wav \
+            --out out/captions-24fps.mp4
+      - uses: actions/upload-artifact@v4
+        with:
+          name: captions
+          path: out/
+          if-no-files-found: error
+          retention-days: 7
+
+  assemble:
+    name: assemble + cinema finish, 24 fps, -23 LUFS
+    needs: [intake, captions]
+    # The captions job is skipped when skip_captions is true; a needed
+    # job that is skipped would normally skip this job too, so run
+    # whenever intake succeeded and captions either succeeded or was
+    # skipped on purpose.
+    if: ${{ always() && needs.intake.result == 'success' && (inputs.skip_captions || needs.captions.result == 'success') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: install ffmpeg
+        timeout-minutes: 10
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg
+      - uses: actions/download-artifact@v4
+        with:
+          name: inputs
+          path: in/
+      - uses: actions/download-artifact@v4
+        if: ${{ !inputs.skip_captions }}
+        with:
+          name: captions
+          path: out/
+      - name: assemble and finish
+        run: |
+          # out/ must exist before ffmpeg writes the final: in the
+          # captioned path the captions-artifact download creates it,
+          # but when skip_captions skips that download nothing does.
+          mkdir -p out
+          if [ "${{ inputs.skip_captions }}" = "true" ]; then
+            python3 -m pipeline-v2.render.echoes_assemble_v2 \
+              --segments-dir in/clips \
+              --segment-map in/segment_map.json \
+              --audio in/narration_mix.wav \
+              --out "out/${{ inputs.final_name }}.mp4"
+          else
+            # Hormozi captions produce a plates file alongside the text
+            # layer; legacy captions do not — pass it only when it
+            # exists, so legacy renders keep working unchanged.
+            PLATES_ARG=""
+            if [ -f out/captions-plates-24fps.mp4 ]; then
+              PLATES_ARG="--captions-plates out/captions-plates-24fps.mp4"
+            fi
+            python3 -m pipeline-v2.render.echoes_assemble_v2 \
+              --segments-dir in/clips \
+              --segment-map in/segment_map.json \
+              --captions out/captions-24fps.mp4 \
+              $PLATES_ARG \
+              --captions-json in/captions.json \
+              --audio in/narration_mix.wav \
+              --out "out/${{ inputs.final_name }}.mp4"
+          fi
+      - name: record size, duration, loudness
+        run: |
+          python3 - <<'PY'
+          import json, subprocess
+          out = subprocess.run(
+              ["ffprobe", "-v", "error", "-show_entries",
+               "stream=width,height,r_frame_rate",
+               "-show_entries", "format=duration,size",
+               "-of", "json", "out/${{ inputs.final_name }}.mp4"],
+              capture_output=True, text=True, check=True)
+          info = json.loads(out.stdout)
+          with open("out/render-report.json", "w") as f:
+              json.dump({
+                  "video_id": "${{ inputs.video_id }}",
+                  "video_title": "${{ inputs.video_title }}",
+                  "final_name": "${{ inputs.final_name }}",
+                  "run_id": "${{ github.run_id }}",
+                  "format": info["format"],
+                  "streams": info["streams"],
+              }, f, indent=2)
+          print(json.dumps(info, indent=2))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: final
+          path: out/
+          if-no-files-found: error
+          retention-days: 7
+
+  return-to-drive:
+    name: return the final to the staging folder
+    needs: assemble
+    # assemble has if: always() (it runs even when captions is skipped),
+    # so this job needs the same treatment: without it, the skipped
+    # captions job taints the default success() check and this job is
+    # skipped even though assemble succeeded.
+    if: ${{ always() && needs.assemble.result == 'success' }}
+    # Assemble runs with if: always() because the captions job is skipped
+    # when skip_captions is true. A downstream job whose needs chain
+    # contains a skipped job is itself skipped unless it also uses
+    # always() — without this, return-to-drive was skipped on every
+    # no-captions run even though assemble succeeded, and the final
+    # only existed as the run artifact.
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: install Drive tools
+        run: python3 -m pip install -q -r requirements/drive.txt
+      - uses: actions/download-artifact@v4
+        with:
+          name: inputs
+          path: in/
+      - uses: actions/download-artifact@v4
+        with:
+          name: final
+          path: out/
+      - name: upload final + timestamps back to staging
+        env:
+          DRIVE_OAUTH_JSON: ${{ secrets.DRIVE_OAUTH_JSON }}
+          DRIVE_FOLDER_ID: ${{ secrets.DRIVE_FOLDER_ID }}
+        run: |
+          # The final returns to the SAME per-video staging folder in
+          # quiet-ledger, NOT to Echoes Drop. Transfer to Echoes Drop
+          # and clean-up of the staging folder are Hub steps, after
+          # local frame QA passes (see docs/ECHOES.md).
+          python3 - <<'PY'
+          import os, sys
+          sys.path.insert(0, "pipeline/drive")
+          import video_env as env
+          service = env.drive_service()
+          folder_id = "${{ inputs.drive_folder_id }}"
+          final = "out/${{ inputs.final_name }}.mp4"
+          rec = env.upload_file(service, folder_id, final,
+                                "${{ inputs.final_name }}.mp4")
+          print("final in staging:", rec.get("webViewLink"))
+          import glob
+          for ts in glob.glob("in/narration-timestamps_*.md"):
+              env.upload_file(service, folder_id, ts,
+                              os.path.basename(ts))
+          meta = env.load_meta(service, folder_id) or {}
+          meta.update({
+              "id": int("${{ inputs.video_id }}"),
+              "topic": "${{ inputs.video_title }}",
+              "status": "rendered",
+              "final_name": "${{ inputs.final_name }}",
+              "render_run_id": "${{ github.run_id }}",
+              "final_link": rec.get("webViewLink"),
+          })
+          env.save_meta(service, folder_id, meta)
+          print("meta.json updated in staging folder")
+          PY
