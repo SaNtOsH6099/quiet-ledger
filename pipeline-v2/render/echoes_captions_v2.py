@@ -77,6 +77,19 @@ lighten). The v2 assemble step DOES consume the plate layer
 the follow-up this paragraph once waited for has landed; the v1
 README's note to the contrary is stale.
 
+DATE CARDS (Hormozi only, optional): a Director-plan date card is a
+top-centre title card on a time jump (Anton 64px, top 180px, 3.0s).
+The captions.json schema has no date-card entry, so the cards are
+staged separately as date_cards.json (optional; absent = no cards)
+and injected into BOTH caption layers by pipeline-v2/render/
+date_cards.py, after the builder writes the composition and before
+the render runs. The injection is the Gate-3-proven local injector,
+generalised: depth-counted insertion (caption divs contain nested
+line divs — the naive first-</div> insertion nests the cards inside
+the last caption and they never appear) plus verification asserts.
+Without this step a GitHub render silently drops the cards, which
+are a locked Gate 3 element — that is what 69 found at Gate 4.
+
 What this script DOES do today: validate the caption JSON against
 the Echoes rules for its format, so a bad caption file fails here
 instead of in the render.
@@ -213,17 +226,32 @@ validate = validate_legacy
 
 
 def render_layer(build_script, captions_json, project_dir, variant_args,
-                 mix=None):
+                 mix=None, date_cards_path=None):
     """Build one composition variant and render it at 24 fps.
 
     Returns the rendered mp4 path (project renders/captions-24fps.mp4).
     variant_args is [] for the text layer, ["plate"] for the plate layer.
+    When date_cards_path is given, the date cards are injected into the
+    generated composition (both variants) before the render runs.
     """
     composition = os.path.join(project_dir, "index.html")
     cmd = ["python3", build_script, captions_json, composition] + variant_args
     if mix is not None:
         cmd += ["--mix", mix]
     subprocess.run(cmd, check=True)
+    if date_cards_path is not None:
+        try:
+            from . import date_cards
+        except ImportError:  # run as a plain script, not -m
+            sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+            import date_cards
+        cards = date_cards.load(date_cards_path)
+        with open(composition, encoding="utf-8") as f:
+            html = f.read()
+        html = date_cards.inject(html, cards)
+        with open(composition, "w", encoding="utf-8") as f:
+            f.write(html)
+        print(f"injected {len(cards)} date cards into {composition}")
     render_script = os.path.join(project_dir, "tools", "render_captions_24fps.sh")
     subprocess.run(["bash", render_script], check=True, cwd=project_dir)
     rendered = os.path.join(project_dir, "renders", "captions-24fps.mp4")
@@ -242,6 +270,11 @@ def main():
                         help="locked narration mix wav: REQUIRED in v2 "
                              "(lesson-41 pause audit runs on it); the "
                              "build fails without it")
+    parser.add_argument("--date-cards", required=False, default=None,
+                        help="date_cards.json (optional, Hormozi only): "
+                             "Director-plan date cards injected into both "
+                             "caption layers before the render; absent = "
+                             "no cards")
     parser.add_argument("--out", required=True)
     args = parser.parse_args()
 
@@ -280,6 +313,8 @@ def main():
         fail(f"--mix file not found: {args.mix}")
     os.makedirs(os.path.dirname(os.path.abspath(args.out)), exist_ok=True)
     if fmt == "legacy":
+        if args.date_cards is not None:
+            fail("--date-cards is Hormozi only (legacy captions have no date cards)")
         rendered = render_layer(build, args.captions_json, project_dir, [],
                                 mix=args.mix)
         os.replace(rendered, args.out)
@@ -289,14 +324,14 @@ def main():
     # stays stable); the plate layer goes next to it and rides the
     # same captions artifact to the assemble job (see module docstring).
     rendered = render_layer(build, args.captions_json, project_dir, [],
-                            mix=args.mix)
+                            mix=args.mix, date_cards_path=args.date_cards)
     os.replace(rendered, args.out)
     print(f"wrote {args.out} (hormozi text layer)")
     plate_out = os.path.join(
         os.path.dirname(os.path.abspath(args.out)),
         "captions-plates-24fps.mp4")
     rendered = render_layer(build, args.captions_json, project_dir, ["plate"],
-                            mix=args.mix)
+                            mix=args.mix, date_cards_path=args.date_cards)
     os.replace(rendered, plate_out)
     print(f"wrote {plate_out} (hormozi plate layer)")
     return 0
