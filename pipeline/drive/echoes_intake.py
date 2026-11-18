@@ -11,6 +11,11 @@ per-video side chat:
   segment_map.json  [{"file": "C1.mp4", "start": 0.0, "end": 9.4}, ...]
   narration-timestamps_*.md — the caption plan / timestamps file, kept
                     alongside the final for the Echoes Drop upload
+  date_cards.json   OPTIONAL (Hormozi only): Director-plan date cards,
+                    [{"text": "MARCH 1995", "start": 7.94}, ...] (end
+                    defaults to start + 3.0s); the captions job injects
+                    them into BOTH caption layers before the render.
+                    Absent = the video has no cards.
 
 Auth is OAuth as the user (DRIVE_OAUTH_JSON). A service account cannot
 create files in a personal Drive folder, and is not used here.
@@ -107,6 +112,17 @@ def main():
         dest = os.path.join(args.out_dir, e["name"])
         download_file(service, e["id"], dest)
         print(f"timestamps {e['name']}: {os.path.getsize(dest)} bytes")
+
+    # Date cards: optional. When the staging folder holds a
+    # date_cards.json (Director-plan date cards, a locked Gate 3
+    # element), the captions job injects them into BOTH caption layers
+    # before the render; without it a GitHub render silently drops
+    # them (69 Gate 4). Videos without cards stage no such file and
+    # render exactly as before.
+    if "date_cards.json" in by_name:
+        dest = os.path.join(args.out_dir, "date_cards.json")
+        download_file(service, by_name["date_cards.json"]["id"], dest)
+        print(f"date_cards.json: {os.path.getsize(dest)} bytes")
 
     seg_map = json.load(open(os.path.join(args.out_dir, "segment_map.json")))
     missing = [s["file"] for s in seg_map
