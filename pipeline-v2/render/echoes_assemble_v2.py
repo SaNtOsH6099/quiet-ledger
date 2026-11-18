@@ -93,12 +93,21 @@ Steps:
   2. Concat the trimmed segments through the concat filter
      (re-encode, so the frame count is exactly the sum of the
      segments), and GUARD: concat must be >= the narration mix, or
-     -shortest would truncate the narration. Fail loudly here, do not
-     mux a short chain. A shortfall of at most 0.05s (frame
+     the video would end before the narration. Fail loudly here, do
+     not mux a short chain. A shortfall of at most 0.05s (frame
      quantisation) is padded; anything more fails (G5).
-  3. Mux the narration (-shortest cuts at the mix length), then a 0.5s
-     tail: audio apad 0.5 + video tpad clone 0.5, so the last word is
-     actually heard.
+     THE VIDEO CHAIN IS THE FINAL LENGTH. The timeline total is the
+     last word + 0.5s by construction (69: 2181f = 90.88s), so the
+     concat already runs 0.5s past the last word. There is NO tail
+     step: no -shortest cut of the video, no tpad clone of the last
+     frame. (69 Gate 4 Defect 2: the v1 code cut the video to the
+     mix with -shortest, then tpadded 12 clone frames under the
+     fade — a frozen tail. That is banned.)
+  3. Mux the narration, padding the AUDIO with silence (apad) to
+     the video length. The mix is shorter than the video chain by
+     the tail (69: mix 90.58s, video 90.88s), so apad adds ~0.3s
+     of silence after the mix's own trailing silence. The last
+     word is heard, then 0.5s of moving S18 under the fade.
   4. Pre-extend the caption text+plate layers as standalone files
      (trim at the last full-opacity frame + tpad clone, frame counts
      verified — G1), then composite by blend in RGB with NO trim/tpad
@@ -122,8 +131,9 @@ Steps:
      Two-pass loudnorm to -23 LUFS (TP -2, LRA 11): apply with the
      measured values and linear=true. libx264 CRF 15, preset slow,
      1080x1920, 24 fps, maxrate 20M, yuv420p, faststart.
-  7. Verify: 1080x1920, 24 fps, duration within 0.5s of mix + 0.5s tail,
-     loudness within 0.5 LUFS of -23. Fail loudly on any mismatch.
+  7. Verify: 1080x1920, 24 fps, duration within 0.5s of the
+     segment timeline total (last word + 0.5s tail), loudness
+     within 0.5 LUFS of -23. Fail loudly on any mismatch.
 
 There is NO size cap. Echoes finals are 180-310 MB; the old assemble.py
 failed anything over 100 MB. That cap is gone.
@@ -431,21 +441,27 @@ def main():
         if concat_dur < mix_dur:
             raise SystemExit("CONCAT STILL TOO SHORT after padding — STOP")
 
+    # MUX + AUDIO PAD (69 Gate 4 Defect 2 fix): the video chain IS the
+    # final length — the timeline total is the last word + 0.5s by
+    # construction, so the concat already runs 0.5s past the last
+    # word. NO -shortest (it would cut the video to the mix), NO
+    # tpad (it would freeze the last frame under the fade). The
+    # audio is padded with silence to the video length instead:
+    # the mix ends 0.2s after the last word and apad adds the rest,
+    # so the tail is ~0.5s of MOVING video under the fade.
     with_audio = os.path.join(args.work_dir, "with_audio.mp4")
     run(["ffmpeg", "-y", "-v", "error",
          "-i", silent, "-i", args.audio,
-         "-map", "0:v", "-map", "1:a",
-         "-c:v", "copy", "-c:a", "aac", "-b:a", "192k",
-         "-shortest", with_audio])
-
-    tailed = os.path.join(args.work_dir, "with_tail.mp4")
-    run(["ffmpeg", "-y", "-v", "error", "-i", with_audio,
          "-filter_complex",
-         "[0:a]apad=pad_dur=0.5[a];"
-         "[0:v]tpad=stop_duration=0.5:stop_mode=clone[v]",
-         "-map", "[v]", "-map", "[a]",
-         "-c:v", "libx264", "-crf", "18", "-preset", "medium",
-         "-c:a", "aac", "-b:a", "192k", "-r", "24", tailed])
+         f"[1:a]apad=whole_dur={concat_dur:.3f}[a]",
+         "-map", "0:v", "-map", "[a]",
+         "-c:v", "copy", "-c:a", "aac", "-b:a", "192k",
+         "-frames:v", str(probe_frames(silent)),
+         with_audio])
+
+    # The muxed file IS the tailed file now: video 2181f, audio
+    # padded to the same length, no cloned frames anywhere.
+    tailed = with_audio
     tailed_dur = probe(tailed)["duration"]
 
     composited = os.path.join(args.work_dir, "composite.mp4")
@@ -525,7 +541,7 @@ def main():
         "colorbalance=gs=-0.04:bs=0.06:rh=0.04:gh=0.01,"
         "unsharp=5:5:0.6:5:5:0.0,vignette=PI/7,"
         "noise=alls=7:allf=t+u,"
-        f"fade=t=out:st={mix_dur:.3f}:d=0.5,format=yuv420p"  # mix end, not timeline total: the last segment may carry 0.5s headroom
+        f"fade=t=out:st={tailed_dur - 0.5:.3f}:d=0.5,format=yuv420p"  # last 0.5s of the VIDEO (last word + 0.5s tail): S18 moving under the fade to the last frame
     )
     loudnorm = (
         "loudnorm=I=-23:TP=-2:LRA=11:"
@@ -552,9 +568,9 @@ def main():
         errors.append(f"resolution {info['width']}x{info['height']} != 1080x1920")
     if abs(info["fps"] - 24) > 0.1:
         errors.append(f"fps {info['fps']:.2f} != 24")
-    if abs(info["duration"] - (mix_dur + 0.5)) > 0.5:
+    if abs(info["duration"] - total) > 0.5:
         errors.append(f"duration {info['duration']:.2f}s != "
-                      f"expected {mix_dur + 0.5:.2f}s")
+                      f"expected timeline total {total:.2f}s")
     final_loudness = measure_loudness(args.out)
     print("final loudness:", json.dumps(final_loudness))
     if abs(float(final_loudness["input_i"]) - (-23)) > 0.5:
