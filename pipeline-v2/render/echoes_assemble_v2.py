@@ -301,12 +301,16 @@ def main():
             continue
         info = probe(src)
         out = os.path.join(args.work_dir, f"seg{i:02d}.mp4")
-        if dur > info["duration"]:
+        if dur - info["duration"] > 1 / 24:
             # NO SILENT HOLDS (G5): a segment longer than its clip is a
             # planning defect, not something to paper over with a held
             # last frame. The local method bans unplanned holds; a fill
             # of <=1s must be ruled as a fill at review, anything
             # longer re-typed as a still beat. Fail loudly here.
+            # One frame of tolerance: timeline times are decimal seconds
+            # while a clip holds whole frames (213f is 8.875s against
+            # an 8.88s window) — the trim takes the frames that exist
+            # and the concat shortfall pad absorbs the sub-frame gap.
             raise SystemExit(
                 f"segment {i} ({seg['file']}): segment {dur:.3f}s is "
                 f"{dur - info['duration']:.3f}s LONGER than its clip "
