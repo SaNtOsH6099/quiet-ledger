@@ -4,9 +4,9 @@
 # switching is per video at dispatch: dispatch this workflow for a v2
 # video, echoes-render for a v1 video — or both on the same video for
 # comparison. See pipeline-v2/README.md (in the draft) for the audit
-# gaps this track closes and the one it cannot (Ken Burns: UNSOLVED,
-# the assemble step FAILS LOUDLY on any Ken Burns segment — never
-# zoompan).
+# gaps this track closes (Ken Burns: SOLVED 2026-11-19 — the assemble
+# step renders KB segments on the runner via
+# pipeline-v2/render/kenburns_v2.py; never zoompan).
 #
 # What this workflow does NOT do (same as v1):
 #   - no narration (Gemini Kore, made locally by the side chat)
@@ -177,6 +177,10 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      - name: install Ken Burns renderer (OpenCV)
+        # kenburns_v2.py (lesson 40 recipe, lesson 50 clamp) renders KB
+        # segments on the runner — pinned to the prototype-proven pair.
+        run: python3 -m pip install -q opencv-python-headless==5.1.0.95 numpy==2.5.5
       - name: install ffmpeg
         timeout-minutes: 20
         run: |
