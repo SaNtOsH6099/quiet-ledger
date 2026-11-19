@@ -22,13 +22,18 @@ audit gap in AUDIT.md):
      .webp) — the segment is built by looping the still for the segment
      duration. This is what the modified pipeline needs: it is
      stills-dominant, so most segments are stills, not clips.
-  KEN BURNS GUARD: a segment asking for a Ken Burns move (a "kenburns"
-     key in the segment map) FAILS LOUDLY. The smooth Ken Burns method
-     is UNSOLVED — never ffmpeg zoompan (it vibrates on fine detail,
-     58 Gap1). No zoompan-based move may be baked into this renderer.
-     Until the smooth method is worked out and verified numerically
-     and by eye, a Ken Burns segment must arrive as a pre-rendered
-     mp4 (generated clip) or as a plain still beat.
+  KEN BURNS RENDERED ON THE RUNNER (SOLVED 2026-11-19): a segment
+     asking for a Ken Burns move carries a "kenburns" dict in the
+     segment map — {"zoom0", "zoom1", "cx0", "cy0", "cx1", "cy1"} —
+     and the assemble step renders it with kenburns_v2.py (OpenCV
+     subpixel warp, the PROVEN prototype) into an mp4 before the
+     concat. The lesson-50 clamp (1/(2z) <= c <= 1-1/(2z)) is
+     asserted on the runner; --verify-only validates the spec
+     without rendering. Never ffmpeg zoompan (it vibrates on fine
+     detail, 58 Gap1). Anything the KB step cannot render — a string
+     spec, a missing key, a clamp violation, an unreadable still, no
+     OpenCV on the runner — FAILS LOUDLY; never a still or a zoompan
+     substituted silently.
   FRAME-PINNED ENCODE + CONCAT (mini-test run 2 fix, 2026-11-18):
      the segment encode used "-t {dur}" with an fps=24 filter, and
      the concat used "-f concat -c copy". Both are version-sensitive:
@@ -54,6 +59,13 @@ audit gap in AUDIT.md):
      the rate is pinned by the "-r 24" output option instead, which
      does not drop frames. Any future fps filter here must be
      re-proven against ffmpeg 6.1.1, not just the local build.
+  VERIFY-ONLY (Hub correction 2026-11-19): --verify-only runs every
+     input check the encode path enforces (segment files exist,
+     durations vs windows incl. the G5 hold refusal, frame-pinned
+     concat vs mix, captions JSON vs layers) and exits without
+     encoding anything. The local cinema twin was a duplicate render
+     — 70 is the LAST video that gets one; 71+ pre-flight is
+     verify-only, and Gate 4 reviews the GitHub render as it lands.
 
 This follows the local 24 fps chain used for videos 65-78 (see
 ~/workspace/video-tools/antikythera-79/work/assemble_clean.sh and
@@ -69,7 +81,11 @@ per-video Drive folder in quiet-ledger, fetched by echoes_intake.py):
                     "end": 9.4}, ...] — start/end are TIMELINE times in
                     the narration; each segment is trimmed from the START
                     of its own clip for (end - start) seconds. Trim only,
-                    never setpts slowing.
+                    never setpts slowing. A Ken Burns segment is a
+                    still image plus a "kenburns" dict {"zoom0",
+                    "zoom1", "cx0", "cy0", "cx1", "cy1"} — rendered on
+                    the runner by kenburns_v2.py (lesson-50 clamp
+                    asserted); see the KEN BURNS note above.
   --captions      captions-24fps.mp4 from echoes_captions.py (HyperFrames
                     karaoke, 1080x1920, 24 fps, black background, white
                     text, gold keywords)
@@ -144,6 +160,15 @@ import os
 import re
 import subprocess
 import sys
+
+# kenburns_v2 lives in this same directory; import it by path (the
+# package name has a hyphen, so a normal package import is not valid
+# syntax — and this keeps the script runnable directly as well as via
+# `python3 -m pipeline-v2.render.echoes_assemble_v2`). kenburns_v2
+# imports cv2/numpy lazily inside its render function, so this import
+# never fails on a machine without OpenCV.
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import kenburns_v2
 
 
 def run(cmd, **kw):
@@ -298,6 +323,14 @@ def main():
     parser.add_argument("--audio", required=True, help="narration mix wav")
     parser.add_argument("--out", required=True)
     parser.add_argument("--work-dir", default="work/assemble")
+    parser.add_argument("--verify-only", action="store_true",
+                        help="run the input checks only (segment files "
+                             "exist, durations vs windows incl. the G5 "
+                             "hold refusal, frame-pinned concat vs mix, "
+                             "captions JSON vs layers) and exit without "
+                             "encoding anything — Gate 4 pre-flight for "
+                             "71+ (the local cinema twin was retired "
+                             "after 70)")
     args = parser.parse_args()
 
     if args.captions and not args.captions_json:
@@ -330,6 +363,86 @@ def main():
         print(f"warning: segment timeline {total:.2f}s and mix "
               f"{mix_dur:.2f}s differ by more than 1s", file=sys.stderr)
 
+    if args.verify_only:
+        # VERIFY-ONLY (Gate 4 pre-flight for 71+, Hub correction
+        # 2026-11-19): run every input check the encode path
+        # enforces, without encoding anything. The local cinema twin
+        # was a duplicate render — 70 is the LAST video that gets
+        # one. A failure here is the same failure the encode would
+        # hit, caught before any segment is rendered (the B7b 0.513s
+        # hold refusal on 70 is the case this exists for).
+        if abs(total - mix_dur) > 1.0:
+            raise SystemExit(
+                f"verify-only: segment timeline {total:.2f}s and mix "
+                f"{mix_dur:.2f}s differ by more than 1s")
+        concat_frames = 0
+        for i, seg in enumerate(segments):
+            src = os.path.join(args.segments_dir, seg["file"])
+            if not os.path.exists(src):
+                raise SystemExit(
+                    f"verify-only: segment {i} file not found: {src}")
+            dur = float(seg["end"]) - float(seg["start"])
+            if dur <= 0:
+                raise SystemExit(
+                    f"verify-only: segment {i} ({seg['file']}): "
+                    f"bad duration {dur}")
+            concat_frames += max(1, round(dur * 24))
+            if seg.get("kenburns") is not None:
+                # KEN BURNS (SOLVED): validate the spec (keys + clamp)
+                # without rendering — the render happens on the runner.
+                if not seg["file"].lower().endswith(
+                        (".jpg", ".jpeg", ".png", ".webp")):
+                    raise SystemExit(
+                        f"verify-only: segment {i} ({seg['file']}): "
+                        f"kenburns needs a still image, not "
+                        f"{seg['file']}")
+                try:
+                    vals = kenburns_v2.validate_kenburns_spec(
+                        seg["kenburns"])
+                except ValueError as e:
+                    raise SystemExit(
+                        f"verify-only: segment {i} ({seg['file']}): "
+                        f"invalid kenburns spec: {e}")
+                print(f"verify-only: segment {i}: kenburns "
+                      f"{seg['file']} {dur:.3f}s zoom "
+                      f"{vals['zoom0']}->{vals['zoom1']}")
+                continue
+            if seg["file"].lower().endswith(
+                    (".jpg", ".jpeg", ".png", ".webp")):
+                print(f"verify-only: segment {i}: still beat "
+                      f"{seg['file']} held {dur:.3f}s")
+                continue
+            info = probe(src)
+            if dur - info["duration"] > 1 / 24:
+                raise SystemExit(
+                    f"verify-only: segment {i} ({seg['file']}): segment "
+                    f"{dur:.3f}s is {dur - info['duration']:.3f}s LONGER "
+                    f"than its clip ({info['duration']:.2f}s) — re-type "
+                    f"as a still beat or re-cut; no silent hold")
+        concat_dur = concat_frames / 24
+        print(f"verify-only: concat {concat_dur:.2f}s "
+              f"({concat_frames} frames) vs mix {mix_dur:.2f}s")
+        if concat_dur < mix_dur:
+            shortfall = mix_dur - concat_dur
+            if shortfall > 0.05:
+                raise SystemExit(
+                    f"verify-only: CONCAT TOO SHORT — short by "
+                    f"{shortfall:.2f}s; quantisation explains at most 0.05s")
+            print(f"verify-only: concat short by {shortfall:.2f}s "
+                  f"(within the 0.05s pad)")
+        if args.captions:
+            last_full = last_full_opacity_frame(args.captions_json,
+                                                args.captions)
+            print(f"verify-only: captions last full-opacity frame "
+                  f"{last_full}")
+            if args.captions_plates:
+                last_full_p = last_full_opacity_frame(
+                    args.captions_json, args.captions_plates)
+                print(f"verify-only: plates last full-opacity frame "
+                      f"{last_full_p}")
+        print("verify-only: PASS")
+        return 0
+
     os.makedirs(args.work_dir, exist_ok=True)
     trimmed = []
     for i, seg in enumerate(segments):
@@ -340,15 +453,38 @@ def main():
         # FRAME-PIN: the encode's frame count is pinned, not left to
         # "-t" + fps boundary rounding (see module docstring).
         nframes = max(1, round(dur * 24))
-        if seg.get("kenburns"):
-            # KEN BURNS GUARD: the smooth method is UNSOLVED. Never
-            # ffmpeg zoompan (vibrates on fine detail, 58 Gap1). A
-            # Ken Burns segment must arrive as a pre-rendered mp4 or
-            # as a plain still beat — this renderer will not fake it.
-            raise SystemExit(
-                f"segment {i} ({seg['file']}): Ken Burns move requested "
-                f"({seg['kenburns']!r}) but the smooth Ken Burns method "
-                f"is unsolved — do not bake in zoompan")
+        if seg.get("kenburns") is not None:
+            # KEN BURNS (SOLVED 2026-11-19): render the move on the
+            # runner with kenburns_v2.py (OpenCV subpixel warp — the
+            # PROVEN prototype). Never ffmpeg zoompan (vibrates on
+            # fine detail, 58 Gap1). Anything this step cannot render
+            # fails loudly here — never a still or a zoompan
+            # substituted silently. The rendered mp4 is already
+            # 1080x1920/24fps/yuv420p, so it bypasses the blur-fill
+            # re-encode (the concat filter re-encodes anyway).
+            if not seg["file"].lower().endswith(
+                    (".jpg", ".jpeg", ".png", ".webp")):
+                raise SystemExit(
+                    f"segment {i} ({seg['file']}): kenburns needs a "
+                    f"still image, not {seg['file']}")
+            try:
+                vals = kenburns_v2.validate_kenburns_spec(
+                    seg["kenburns"])
+            except ValueError as e:
+                raise SystemExit(
+                    f"segment {i} ({seg['file']}): invalid kenburns "
+                    f"spec: {e}")
+            out = os.path.join(args.work_dir, f"seg{i:02d}.mp4")
+            kenburns_v2.render_kenburns(src, out, dur, vals)
+            got = probe_frames(out)
+            if got != nframes:
+                raise SystemExit(
+                    f"segment {i} ({seg['file']}): kenburns rendered "
+                    f"{got} frames, expected {nframes} — frame pin failed")
+            print(f"segment {i}: kenburns {seg['file']} {dur:.3f}s "
+                  f"zoom {vals['zoom0']}->{vals['zoom1']}")
+            trimmed.append(out)
+            continue
         if seg["file"].lower().endswith((".jpg", ".jpeg", ".png", ".webp")):
             # STILL BEAT (G3): a locked still held for the segment
             # duration. Loop the still; no motion is faked here.
