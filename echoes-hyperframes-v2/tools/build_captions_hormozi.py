@@ -302,6 +302,29 @@ def main():
                 )
             prev_word = (cap["text"].split()[j], i, s)
 
+    # LESSON 88 (Gate 4 FAIL, video 62, 2026-11-20): no word may start
+    # within 2 frames of its group end. The builder fades each group out
+    # over its last ~2 frames (exit_dur 0.12s); a last word starting
+    # inside that window is swallowed — HE 16.05 and IT 19.03 had ZERO
+    # caption frames, THE 51.60 one dimmed frame — while every Gate 3
+    # check (TEST 1, TEST 2b, independent audit) passes, because they
+    # check start times against the audio, never display frames against
+    # the group fade. The check is on the time gap (>= 2/24s), not on
+    # ceil frame arithmetic: THE's gap 0.08s ceils to 2 frames but is
+    # only 1.92 frames, and the frame test would miss it.
+    for i, cap in enumerate(captions):
+        for j, s in enumerate(cap["word_starts"]):
+            s = float(s)
+            gap = float(cap["end"]) - s
+            if gap * 24 < 2 - 1e-9:
+                fail(
+                    f"lesson 88: caption {i} {cap['text']!r} word "
+                    f"{cap['text'].split()[j]!r} at {s:.2f} is {gap:.2f}s "
+                    f"({gap * 24:.2f} frames) before the group end "
+                    f"{float(cap['end']):.2f} — regroup it to the next "
+                    f"group so it gets >=2 full-brightness frames"
+                )
+
     # PAUSE AUDIT (lesson 41) — only when --mix is given. Flatten the
     # groups to (word, start, end). A word's end is the next word's
     # start, EXCEPT the last word of a group, whose end is the group's
