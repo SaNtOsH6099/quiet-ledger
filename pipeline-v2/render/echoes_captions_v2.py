@@ -90,6 +90,21 @@ the last caption and they never appear) plus verification asserts.
 Without this step a GitHub render silently drops the cards, which
 are a locked Gate 3 element — that is what 69 found at Gate 4.
 
+HOOK TEXT (Hormozi only, optional): the Director-plan hook text is
+the approved on-screen text on the opening shot (Director plan §6):
+a second fact, not duplicating the spoken line, gold #FFD166, in the
+lower-third safe zone for the full shot (e.g. 63: "NO ONE EVER CAME
+FORWARD", 0.0-8.7s). The captions.json schema has no hook-text entry,
+so it is staged separately as hook_text.json (optional; absent = no
+hook text) and injected into BOTH caption layers by
+pipeline-v2/render/hook_text.py, after the builder writes the
+composition and before the render runs — the same class as the date
+cards, same depth-counted insertion + verification asserts. Without
+this step a GitHub render silently drops the hook text, which is a
+locked Gate 0 element — that is what 63 found at Gate 4 (the text
+lived only in plan/report prose, with no renderable input, so no S1
+frame showed it).
+
 What this script DOES do today: validate the caption JSON against
 the Echoes rules for its format, so a bad caption file fails here
 instead of in the render.
@@ -226,13 +241,15 @@ validate = validate_legacy
 
 
 def render_layer(build_script, captions_json, project_dir, variant_args,
-                 mix=None, date_cards_path=None):
+                 mix=None, date_cards_path=None, hook_text_path=None):
     """Build one composition variant and render it at 24 fps.
 
     Returns the rendered mp4 path (project renders/captions-24fps.mp4).
     variant_args is [] for the text layer, ["plate"] for the plate layer.
     When date_cards_path is given, the date cards are injected into the
     generated composition (both variants) before the render runs.
+    When hook_text_path is given, the hook text is injected the same
+    way (both variants).
     """
     composition = os.path.join(project_dir, "index.html")
     cmd = ["python3", build_script, captions_json, composition] + variant_args
@@ -252,6 +269,19 @@ def render_layer(build_script, captions_json, project_dir, variant_args,
         with open(composition, "w", encoding="utf-8") as f:
             f.write(html)
         print(f"injected {len(cards)} date cards into {composition}")
+    if hook_text_path is not None:
+        try:
+            from . import hook_text
+        except ImportError:  # run as a plain script, not -m
+            sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+            import hook_text
+        hook = hook_text.load(hook_text_path)
+        with open(composition, encoding="utf-8") as f:
+            html = f.read()
+        html = hook_text.inject(html, hook)
+        with open(composition, "w", encoding="utf-8") as f:
+            f.write(html)
+        print(f"injected hook text {hook[0]!r} into {composition}")
     render_script = os.path.join(project_dir, "tools", "render_captions_24fps.sh")
     subprocess.run(["bash", render_script], check=True, cwd=project_dir)
     rendered = os.path.join(project_dir, "renders", "captions-24fps.mp4")
@@ -275,6 +305,11 @@ def main():
                              "Director-plan date cards injected into both "
                              "caption layers before the render; absent = "
                              "no cards")
+    parser.add_argument("--hook-text", required=False, default=None,
+                        help="hook_text.json (optional, Hormozi only): "
+                             "Director-plan hook text injected into both "
+                             "caption layers before the render; absent = "
+                             "no hook text")
     parser.add_argument("--out", required=True)
     args = parser.parse_args()
 
@@ -315,6 +350,8 @@ def main():
     if fmt == "legacy":
         if args.date_cards is not None:
             fail("--date-cards is Hormozi only (legacy captions have no date cards)")
+        if args.hook_text is not None:
+            fail("--hook-text is Hormozi only (legacy captions have no hook text)")
         rendered = render_layer(build, args.captions_json, project_dir, [],
                                 mix=args.mix)
         os.replace(rendered, args.out)
@@ -324,14 +361,16 @@ def main():
     # stays stable); the plate layer goes next to it and rides the
     # same captions artifact to the assemble job (see module docstring).
     rendered = render_layer(build, args.captions_json, project_dir, [],
-                            mix=args.mix, date_cards_path=args.date_cards)
+                            mix=args.mix, date_cards_path=args.date_cards,
+                            hook_text_path=args.hook_text)
     os.replace(rendered, args.out)
     print(f"wrote {args.out} (hormozi text layer)")
     plate_out = os.path.join(
         os.path.dirname(os.path.abspath(args.out)),
         "captions-plates-24fps.mp4")
     rendered = render_layer(build, args.captions_json, project_dir, ["plate"],
-                            mix=args.mix, date_cards_path=args.date_cards)
+                            mix=args.mix, date_cards_path=args.date_cards,
+                            hook_text_path=args.hook_text)
     os.replace(rendered, plate_out)
     print(f"wrote {plate_out} (hormozi plate layer)")
     return 0

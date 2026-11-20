@@ -16,6 +16,13 @@ per-video side chat:
                     defaults to start + 3.0s); the captions job injects
                     them into BOTH caption layers before the render.
                     Absent = the video has no cards.
+  hook_text.json    OPTIONAL (Hormozi only): Director-plan hook text,
+                    {"text": "NO ONE EVER CAME FORWARD", "start": 0.0,
+                    "end": 8.7} — the approved on-screen text on the
+                    opening shot, in the lower-third safe zone for the
+                    full shot; the captions job injects it into BOTH
+                    caption layers before the render. Absent = the video
+                    has no hook text.
 
 Auth is OAuth as the user (DRIVE_OAUTH_JSON). A service account cannot
 create files in a personal Drive folder, and is not used here.
@@ -123,6 +130,17 @@ def main():
         dest = os.path.join(args.out_dir, "date_cards.json")
         download_file(service, by_name["date_cards.json"]["id"], dest)
         print(f"date_cards.json: {os.path.getsize(dest)} bytes")
+
+    # Hook text: optional. When the staging folder holds a
+    # hook_text.json (Director-plan hook text, a locked Gate 0
+    # element), the captions job injects it into BOTH caption layers
+    # before the render; without it a GitHub render silently drops
+    # it (63 Gate 4). Videos without a hook text stage no such file
+    # and render exactly as before.
+    if "hook_text.json" in by_name:
+        dest = os.path.join(args.out_dir, "hook_text.json")
+        download_file(service, by_name["hook_text.json"]["id"], dest)
+        print(f"hook_text.json: {os.path.getsize(dest)} bytes")
 
     seg_map = json.load(open(os.path.join(args.out_dir, "segment_map.json")))
     missing = [s["file"] for s in seg_map

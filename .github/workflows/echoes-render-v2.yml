@@ -146,14 +146,23 @@ jobs:
         # before the render; without it a GitHub render silently drops
         # them (69 Gate 4). Videos without cards stage no such file
         # and render exactly as before.
+        # --hook-text is optional: when the staging folder holds a
+        # hook_text.json (Director-plan hook text, a locked Gate 0
+        # element), the text is injected into BOTH caption layers
+        # before the render; without it a GitHub render silently drops
+        # it (63 Gate 4). Videos without a hook text stage no such file
+        # and render exactly as before.
         run: |
           DC_ARG=""
           if [ -f in/date_cards.json ]; then DC_ARG="--date-cards in/date_cards.json"; fi
+          HT_ARG=""
+          if [ -f in/hook_text.json ]; then HT_ARG="--hook-text in/hook_text.json"; fi
           python3 -m pipeline-v2.render.echoes_captions_v2 \
             --captions-json in/captions.json \
             --project-dir echoes-hyperframes-v2 \
             --mix in/narration_mix.wav \
             $DC_ARG \
+            $HT_ARG \
             --out out/captions-24fps.mp4
       - uses: actions/upload-artifact@v4
         with:
