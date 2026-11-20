@@ -195,12 +195,22 @@ def probe(path):
     d = json.loads(out.stdout)
     stream = d["streams"][0]
     num, den = stream["r_frame_rate"].split("/")
+    fmt = d.get("format", {})
+    # Still images (notably .webp) carry no format.duration — ffprobe
+    # omits the key entirely (67 Gate 4: KeyError 'duration' on the
+    # first PLAIN .webp still). Duration is only used for video clips
+    # and the finished file, both of which always carry it; a still
+    # reports None and its callers never touch the field.
+    try:
+        duration = float(fmt["duration"])
+    except (KeyError, TypeError, ValueError):
+        duration = None
     return {
         "width": int(stream["width"]),
         "height": int(stream["height"]),
         "fps": int(num) / int(den),
-        "duration": float(d["format"]["duration"]),
-        "size": int(d["format"]["size"]),
+        "duration": duration,
+        "size": int(fmt["size"]),
     }
 
 
@@ -715,7 +725,7 @@ def main():
         "colorbalance=gs=-0.04:bs=0.06:rh=0.04:gh=0.01,"
         "unsharp=5:5:0.6:5:5:0.0,vignette=PI/7,"
         "noise=alls=7:allf=t+u,"
-        f"fade=t=out:st={tailed_dur - 0.5:.3f}:d=0.5,format=yuv420p"  # last 0.5s of the VIDEO (last word + 0.5s tail): S18 moving under the fade to the last frame
+        f"fade=t=out:st={(tailed_frames - 1) / 24 - 0.5:.3f}:d=0.5,format=yuv420p"  # last 0.5s of the VIDEO, ending on the LAST FRAME ((tailed_frames-1)/24): the old st=tailed_dur-0.5 ended the fade 1/24s past the last frame, so the last frame sat 8.3% into the fade and a bright last frame failed the luma assertion (66 Gate 4: luma 13.62)
     )
     loudnorm = (
         "loudnorm=I=-23:TP=-2:LRA=11:"
