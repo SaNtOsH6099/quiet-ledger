@@ -66,6 +66,14 @@ audit gap in AUDIT.md):
      encoding anything. The local cinema twin was a duplicate render
      — 70 is the LAST video that gets one; 71+ pre-flight is
      verify-only, and Gate 4 reviews the GitHub render as it lands.
+  LAST-FRAME LUMA ASSERTION (65 Gate 4 F1, 2026-11-20): after the
+     finish encode, the final frame's mean RGB luma must be < 10
+     (63 v2 measured 5.68; the failed 65 v1 measured 18.38) — the
+     0.5s tail fade must complete. Run 44742850858 applied the
+     correct fade (st=64.000:d=0.5, confirmed from its assemble job
+     log) yet the fade ran at half rate on that runner, so a correct
+     filter is not enough: the render must fail loudly here instead
+     of shipping mid-fade.
 
 This follows the local 24 fps chain used for videos 65-78 (see
 ~/workspace/video-tools/antikythera-79/work/assemble_clean.sh and
@@ -264,6 +272,36 @@ def measure_loudness(path):
     if not m:
         raise RuntimeError("loudnorm measurement produced no JSON:\n" + text[-2000:])
     return json.loads(m.group(0))
+
+
+def last_frame_luma(path):
+    """Mean RGB luma (Rec.601) of the final frame of a video file.
+
+    Tail-fade assertion (65 Gate 4 F1, 2026-11-20): the 0.5s fade-out
+    must complete, so the final frame must be near black. Run
+    44742850858 applied fade=t=out:st=64.000:d=0.5 correctly (confirmed
+    from its assemble job log) yet shipped a final frame at mean luma
+    18.38 — the fade ran at half rate on that runner. The 63 v2 control
+    measured 5.68 by this same method. Threshold 10 sits between the
+    passing control and the failing render.
+    """
+    n = probe_frames(path)
+    info = probe(path)
+    out = subprocess.run(
+        ["ffmpeg", "-v", "error", "-i", path,
+         "-vf", f"select='eq(n,{n - 1})'",
+         "-frames:v", "1", "-fps_mode", "passthrough",
+         "-f", "rawvideo", "-pix_fmt", "rgb24", "-"],
+        capture_output=True, check=True)
+    raw = out.stdout
+    expected = info["width"] * info["height"] * 3
+    if len(raw) != expected:
+        raise RuntimeError(
+            f"last-frame extraction gave {len(raw)} bytes, expected "
+            f"{expected} — cannot measure tail fade")
+    pixels = len(raw) // 3
+    return (0.299 * sum(raw[0::3]) + 0.587 * sum(raw[1::3])
+            + 0.114 * sum(raw[2::3])) / pixels
 
 
 def blur_fill_filter(width, height):
@@ -711,6 +749,16 @@ def main():
     print("final loudness:", json.dumps(final_loudness))
     if abs(float(final_loudness["input_i"]) - (-23)) > 0.5:
         errors.append(f"loudness {final_loudness['input_i']} LUFS != -23")
+    # Last-frame luma assertion (65 Gate 4 F1): the 0.5s tail fade must
+    # complete — the final frame must be near black (< 10 mean RGB luma;
+    # 63 v2 measured 5.68, the failed 65 v1 measured 18.38). A correct
+    # fade filter can still render at half rate on a runner, so the
+    # render must fail loudly here instead of shipping mid-fade.
+    last_luma = last_frame_luma(args.out)
+    print(f"last-frame mean RGB luma: {last_luma:.2f}")
+    if last_luma >= 10:
+        errors.append(f"last-frame luma {last_luma:.2f} >= 10 — "
+                      "tail fade did not complete")
     if errors:
         for e in errors:
             print("VERIFY FAILED: " + e, file=sys.stderr)
