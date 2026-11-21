@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="en" data-resolution="portrait">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=1080, height=1920" />
+<script src="../lib/gsap.min.js"></script>
+<script src="../lib/SplitText.min.js"></script>
+<style>
+  @font-face { font-family:"EchoesDisplay"; src:url("../lib/ArchivoBlack-Regular.ttf") format("truetype"); }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  html,body { width:1080px; height:1920px; background:#000; overflow:hidden; }
+  #root { position:relative; width:1080px; height:1920px; background:#000;
+    font-family:"EchoesDisplay","Arial Black",Arial,sans-serif; color:#fff; }
+  .vignette { position:absolute; inset:0; pointer-events:none;
+    background:radial-gradient(ellipse at 50% 55%, rgba(0,0,0,0) 55%, rgba(0,0,0,.55) 100%); }
+  .redwash { position:absolute; inset:0; pointer-events:none;
+    background:radial-gradient(ellipse at 50% 62%, rgba(180,0,0,.18) 0%, rgba(0,0,0,0) 55%); }
+  .kicker { position:absolute; top:1010px; left:0; width:1080px; text-align:center;
+    font-size:34px; letter-spacing:14px; color:#c8c8c8; font-weight:900; }
+  .rule { position:absolute; top:1082px; left:390px; width:300px; height:6px; background:#c00; }
+  .block { position:absolute; top:1112px; left:0; width:1080px; text-align:center; }
+  .w1 { font-size:150px; line-height:.95; color:#fff;
+    text-shadow:6px 6px 0 rgba(0,0,0,.85); }
+  .w2 { font-size:230px; line-height:.95; color:#FFD166;
+    text-shadow:0 0 34px rgba(255,209,102,.35), 8px 8px 0 rgba(0,0,0,.85); }
+  .uline { width:420px; height:8px; background:#c00; margin:20px auto 0; }
+  .sub { font-size:48px; letter-spacing:6px; color:#fff; margin-top:28px;
+    text-shadow:4px 4px 0 rgba(0,0,0,.9); }
+</style>
+</head>
+<body>
+<div id="root" data-composition-id="kinetic-title" data-start="0" data-duration="5" data-width="1080" data-height="1920">
+  <div class="redwash"></div>
+  <div class="kicker" id="kicker">ECHOES ORIGINALS</div>
+  <div class="rule" id="rule"></div>
+  <div class="block" id="block">
+    <div class="w1" id="w1">THEY</div>
+    <div class="w2" id="w2">KNEW</div>
+    <div class="uline" id="uline"></div>
+    <div class="sub" id="sub">BEFORE IT HAPPENED</div>
+  </div>
+  <div class="vignette"></div>
+</div>
+<script>
+  gsap.registerPlugin(SplitText);
+  var split1 = new SplitText("#w1", {type:"chars"});
+  var split2 = new SplitText("#w2", {type:"chars"});
+  var tl = gsap.timeline({paused:true});
+  tl.fromTo("#kicker", {opacity:0, y:24}, {opacity:1, y:0, duration:0.5, ease:"power2.out"}, 0);
+  tl.fromTo("#rule", {scaleX:0}, {scaleX:1, duration:0.5, ease:"power3.inOut"}, 0.2);
+  tl.fromTo(split1.chars, {opacity:0, y:90, rotationX:-70}, {opacity:1, y:0, rotationX:0, duration:0.45, stagger:0.07, ease:"back.out(1.7)"}, 0.5);
+  tl.fromTo(split2.chars, {opacity:0, y:150, scale:1.3}, {opacity:1, y:0, scale:1, duration:0.5, stagger:0.06, ease:"back.out(1.5)"}, 0.95);
+  tl.fromTo("#uline", {scaleX:0}, {scaleX:1, duration:0.35, ease:"power3.inOut"}, 1.45);
+  tl.fromTo("#sub", {opacity:0, y:22}, {opacity:1, y:0, duration:0.5, ease:"power2.out"}, 1.6);
+  tl.to("#block", {scale:1.025, duration:3.0, ease:"sine.inOut"}, 2.0);
+  tl.to({}, {duration:0.01}, 5.0);
+  window.__timelines = window.__timelines || {};
+  window.__timelines["kinetic-title"] = tl;
+  tl.seek(0);
+</script>
+</body>
+</html>
