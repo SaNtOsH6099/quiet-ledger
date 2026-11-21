@@ -1,0 +1,5 @@
+{"case": 4, "mode": "clip->clip",
+ "a_clip": "68-B5b-clip-v1.mp4", "a_clip_frames": 48,
+ "b_clip": "68-B1-clip-v1.mp4", "b_clip_frames": 48,
+ "portal_x": 0.50, "portal_y": 0.60,
+ "hold_a_s": 2.0, "zoom_s": 2.5, "hold_b_s": 2.0}
