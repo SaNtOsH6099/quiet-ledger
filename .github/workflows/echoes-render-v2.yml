@@ -102,7 +102,7 @@ jobs:
           name: inputs
           path: in/
           if-no-files-found: error
-          retention-days: 7
+          retention-days: 1
 
   captions:
     name: HyperFrames karaoke captions, 24 fps
@@ -174,7 +174,7 @@ jobs:
           name: captions
           path: out/
           if-no-files-found: error
-          retention-days: 7
+          retention-days: 1
 
   assemble:
     name: assemble + cinema finish, 24 fps, -23 LUFS
@@ -283,7 +283,7 @@ jobs:
           name: final
           path: out/
           if-no-files-found: error
-          retention-days: 7
+          retention-days: 1
 
   return-to-drive:
     name: return the final to the staging folder
