@@ -1,0 +1,86 @@
+# echoes-motion-test: HyperFrames + GSAP motion-graphics test (technique 1).
+# SEPARATE workflow — does not touch echoes-render-v2.yml,
+# echoes-transition-test.yml, echoes_assemble_v2.py or echoes_intake.py.
+# One dispatch per template. Compositions live in the repo at
+# motion-test/hyperframes/compositions/ (GSAP 3.15 + SplitText /
+# DrawSVG / MotionPath vendored in motion-test/hyperframes/lib/,
+# Archivo Black font vendored there too — no CDN at render time).
+# HyperFrames renders via headless Chrome seeking the paused GSAP
+# timeline frame by frame, then ffmpeg re-encodes to -r 24 CRF 18.
+# Output is one mp4 artifact, retention 1 day (public repo).
+# No captions, no narration, no cinema finish — silent visual test.
+name: echoes-motion-test
+
+run-name: "Motion test (HyperFrames) ${{ inputs.template }}"
+
+on:
+  workflow_dispatch:
+    inputs:
+      template:
+        description: "Template: kinetic-title, date-card, map-route, diagram-highlight"
+        required: true
+        type: choice
+        options: ["kinetic-title", "date-card", "map-route", "diagram-highlight"]
+      out_name:
+        description: "Output filename (no extension), e.g. hyperframes-kinetic-title-v1"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  render:
+    name: render motion template ${{ inputs.template }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: install ffmpeg
+        timeout-minutes: 20
+        run: |
+          for i in 1 2 3; do
+            sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg && break
+            echo "ffmpeg install attempt $i failed, retrying in 30s..."
+            sleep 30
+          done
+          ffmpeg -version | head -1
+          node --version
+      - name: lint compositions (non-blocking)
+        working-directory: motion-test/hyperframes
+        continue-on-error: true
+        env:
+          HYPERFRAMES_CACHE_DIR: ${{ runner.temp }}/hf-cache
+        run: |
+          mkdir -p "$HYPERFRAMES_CACHE_DIR"
+          npx --yes hyperframes@0.9.77 check --include-unmounted || true
+      - name: render with HyperFrames
+        working-directory: motion-test/hyperframes
+        timeout-minutes: 40
+        env:
+          HYPERFRAMES_CACHE_DIR: ${{ runner.temp }}/hf-cache
+        run: |
+          mkdir -p "$HYPERFRAMES_CACHE_DIR" out
+          npx --yes hyperframes@0.9.77 render \
+            -c "compositions/${{ inputs.template }}.html" \
+            -o "hf-${{ inputs.template }}.mp4" -f 24 -q looks
+          ls -lh hf-*.mp4
+      - name: re-encode to house spec (-r 24, CRF 18)
+        working-directory: motion-test/hyperframes
+        run: |
+          ffmpeg -y -i "hf-${{ inputs.template }}.mp4" \
+            -c:v libx264 -pix_fmt yuv420p -r 24 -crf 18 -an \
+            "out/${{ inputs.out_name }}.mp4"
+          ffprobe -v error -select_streams v:0 \
+            -show_entries stream=width,height,r_frame_rate,duration,codec_name \
+            -of default=noprint_wrappers=1 "out/${{ inputs.out_name }}.mp4"
+          ls -lh out/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: motion-hyperframes-${{ inputs.template }}-${{ inputs.out_name }}
+          path: motion-test/hyperframes/out/
+          if-no-files-found: error
+          retention-days: 1
