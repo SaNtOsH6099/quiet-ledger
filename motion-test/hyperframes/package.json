@@ -1,0 +1,9 @@
+{
+  "name": "echoes-motion-hyperframes",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "check": "npx --yes hyperframes@0.9.77 check",
+    "render": "npx --yes hyperframes@0.9.77 render"
+  }
+}
