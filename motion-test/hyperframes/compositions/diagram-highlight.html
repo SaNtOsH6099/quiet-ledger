@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="en" data-resolution="portrait">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=1080, height=1920" />
+<script src="../lib/gsap.min.js"></script>
+<script src="../lib/DrawSVGPlugin.min.js"></script>
+<style>
+  @font-face { font-family:"EchoesDisplay"; src:url("../lib/ArchivoBlack-Regular.ttf") format("truetype"); }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  html,body { width:1080px; height:1920px; background:#000; overflow:hidden; }
+  #root { position:relative; width:1080px; height:1920px; background:#050505;
+    font-family:"EchoesDisplay","Arial Black",Arial,sans-serif; }
+  svg { display:block; width:1080px; height:1920px; }
+  .lbl { font-family:"EchoesDisplay",Arial,sans-serif; fill:#e8e8e8; }
+  .lbl-small { font-family:Arial,sans-serif; font-weight:700; fill:#9a9a9a; letter-spacing:3px; }
+  .lbl-red { font-family:"EchoesDisplay",Arial,sans-serif; fill:#ff2a2a; }
+</style>
+</head>
+<body>
+<div id="root" data-composition-id="diagram-highlight" data-start="0" data-duration="5" data-width="1080" data-height="1920">
+<svg viewBox="0 0 1080 1920" xmlns="http://www.w3.org/2000/svg">
+  <rect width="1080" height="1920" fill="#050505"/>
+  <text class="lbl-small" x="540" y="540" font-size="30" text-anchor="middle" id="title">HOUSE CROSS-SECTION</text>
+  <g id="house" stroke="#d8d8d8" stroke-width="5" fill="none" stroke-linejoin="round" stroke-linecap="round">
+    <path id="roof" d="M240,900 L540,640 L840,900"/>
+    <path id="walls" d="M280,900 L280,1500 L800,1500 L800,900"/>
+    <path id="floor" d="M280,1200 L800,1200"/>
+    <path id="stairs" d="M420,1500 L560,1200"/>
+    <path id="door" d="M600,1500 L600,1360 L680,1360 L680,1500"/>
+  </g>
+  <g id="atticwin" stroke="#d8d8d8" stroke-width="4" fill="none">
+    <rect x="490" y="760" width="100" height="120"/>
+    <line x1="540" y1="760" x2="540" y2="880"/>
+    <line x1="490" y1="820" x2="590" y2="820"/>
+  </g>
+  <rect x="490" y="760" width="100" height="120" fill="#FFD166" opacity="0.12" id="glow"/>
+  <ellipse id="circle" cx="540" cy="820" rx="150" ry="130" fill="none" stroke="#ff2a2a" stroke-width="7"/>
+  <line id="leader" x1="685" y1="860" x2="800" y2="930" stroke="#ff2a2a" stroke-width="4"/>
+  <text class="lbl-red" id="lbl" x="810" y="950" font-size="36">THE ATTIC</text>
+  <text class="lbl-red" id="lbl2" x="810" y="992" font-size="36">WINDOW</text>
+  <text class="lbl-small" id="lbl-room" x="330" y="1150" font-size="28" opacity="0">GROUND FLOOR</text>
+  <text class="lbl-small" id="lbl-attic" x="330" y="980" font-size="28" opacity="0">ATTIC</text>
+  <text class="lbl-small" x="540" y="1620" font-size="26" text-anchor="middle" id="foot">NOT TO SCALE &middot; SCHEMATIC</text>
+</svg>
+</div>
+<script>
+  gsap.registerPlugin(DrawSVGPlugin);
+  var tl = gsap.timeline({paused:true});
+  tl.fromTo("#title", {opacity:0}, {opacity:1, duration:0.5, ease:"power2.out"}, 0);
+  tl.fromTo("#roof", {drawSVG:"0%"}, {drawSVG:"100%", duration:0.7, ease:"power2.inOut"}, 0.2);
+  tl.fromTo("#walls", {drawSVG:"0%"}, {drawSVG:"100%", duration:0.8, ease:"power2.inOut"}, 0.6);
+  tl.fromTo("#floor, #stairs, #door", {drawSVG:"0%"}, {drawSVG:"100%", duration:0.6, stagger:0.15, ease:"power2.inOut"}, 1.0);
+  tl.fromTo("#atticwin", {opacity:0}, {opacity:1, duration:0.4}, 1.6);
+  tl.fromTo("#lbl-attic, #lbl-room", {opacity:0}, {opacity:1, duration:0.4, stagger:0.2}, 1.7);
+  tl.fromTo("#glow", {opacity:0}, {opacity:0.12, duration:0.5}, 2.0);
+  tl.fromTo("#circle", {drawSVG:"0%"}, {drawSVG:"100%", duration:0.9, ease:"power2.inOut"}, 2.2);
+  tl.fromTo("#leader", {drawSVG:"0%"}, {drawSVG:"100%", duration:0.4, ease:"power2.out"}, 3.1);
+  tl.fromTo("#lbl, #lbl2", {opacity:0, scale:0.8}, {opacity:1, scale:1, duration:0.45, stagger:0.08, ease:"back.out(1.7)", transformOrigin:"0% 50%"}, 3.3);
+  tl.fromTo("#foot", {opacity:0}, {opacity:1, duration:0.4}, 3.8);
+  tl.to({}, {duration:0.01}, 5.0);
+  window.__timelines = window.__timelines || {};
+  window.__timelines["diagram-highlight"] = tl;
+  tl.seek(0);
+</script>
+</body>
+</html>
