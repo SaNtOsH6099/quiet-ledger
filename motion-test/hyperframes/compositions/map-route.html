@@ -19,7 +19,7 @@
 </style>
 </head>
 <body>
-<div id="root" data-composition-id="map-route" data-start="0" data-duration="5" data-width="1080" data-height="1920">
+<div id="root" data-composition-id="map-route" data-start="0" data-duration="7" data-width="1080" data-height="1920">
 <svg viewBox="0 0 1080 1920" xmlns="http://www.w3.org/2000/svg">
   <rect width="1080" height="1920" fill="#070707"/>
   <g id="grid" stroke="#141414" stroke-width="2">
@@ -39,8 +39,7 @@
     <path d="M120,1920 L420,1200 L700,900 L980,700"/>
     <path d="M0,1500 L540,1380 L1080,1420"/>
   </g>
-  <text class="lbl" id="lbl-forest" x="600" y="740" font-size="34" opacity="0">RENDLESHAM</text>
-  <text class="lbl" id="lbl-forest2" x="600" y="782" font-size="34" opacity="0">FOREST</text>
+  <text class="lbl" id="lbl-forest" x="620" y="1250" font-size="32" opacity="0">RENDLESHAM FOREST</text>
   <path id="route" d="M180,1680 C300,1500 380,1380 470,1240 C560,1100 620,1000 700,920 C760,850 820,800 880,760"
     fill="none" stroke="#FFD166" stroke-width="7" stroke-linecap="round"/>
   <circle id="startpin" cx="180" cy="1680" r="16" fill="#c00" stroke="#fff" stroke-width="4" opacity="0"/>
@@ -48,15 +47,11 @@
   <circle id="dot" cx="180" cy="1680" r="20" fill="#FFD166" stroke="#000" stroke-width="4" opacity="0"/>
   <circle id="endpin" cx="880" cy="760" r="0" fill="#c00" stroke="#fff" stroke-width="5"/>
   <text class="lbl-gold" id="lbl-end" x="640" y="700" font-size="40" opacity="0">THE LIGHTS</text>
-  <text class="lbl-small" id="lbl-end2" x="640" y="738" font-size="26" opacity="0">27 DECEMBER 1980</text>
+  <text class="lbl-small" id="lbl-end2" x="640" y="738" font-size="26" opacity="0">26 DECEMBER 1980</text>
   <g id="compass">
     <circle cx="960" cy="180" r="52" fill="none" stroke="#555" stroke-width="3"/>
     <text class="lbl" x="944" y="196" font-size="36">N</text>
     <line x1="960" y1="140" x2="960" y2="128" stroke="#c00" stroke-width="4"/>
-  </g>
-  <g id="scalebar">
-    <rect x="80" y="1820" width="200" height="10" fill="#888"/>
-    <text class="lbl-small" x="80" y="1800" font-size="26">2 MILES</text>
   </g>
 </svg>
 </div>
@@ -67,14 +62,13 @@
   tl.fromTo("#startpin", {opacity:0, scale:0}, {opacity:1, scale:1, duration:0.4, ease:"back.out(2)", transformOrigin:"50% 50%"}, 0.4);
   tl.fromTo("#lbl-start", {opacity:0}, {opacity:1, duration:0.4}, 0.5);
   tl.fromTo("#dot", {opacity:0}, {opacity:1, duration:0.2}, 0.8);
-  tl.fromTo("#route", {drawSVG:"0%"}, {drawSVG:"100%", duration:2.6, ease:"power1.inOut"}, 0.8);
-  tl.to("#dot", {motionPath:{path:"#route", align:"#route", alignOrigin:[0.5,0.5]}, duration:2.6, ease:"power1.inOut"}, 0.8);
-  tl.fromTo("#lbl-forest, #lbl-forest2", {opacity:0, y:14}, {opacity:1, y:0, duration:0.5, stagger:0.1, ease:"power2.out"}, 1.6);
-  tl.to("#endpin", {attr:{r:22}, duration:0.45, ease:"back.out(2.5)"}, 3.5);
-  tl.fromTo("#lbl-end", {opacity:0, scale:0.8}, {opacity:1, scale:1, duration:0.45, ease:"back.out(1.7)", transformOrigin:"0% 50%"}, 3.55);
-  tl.fromTo("#lbl-end2", {opacity:0}, {opacity:1, duration:0.4}, 3.8);
-  tl.to("#dot", {opacity:0, duration:0.4}, 4.4);
-  tl.to({}, {duration:0.01}, 5.0);
+  tl.fromTo("#route", {drawSVG:"0%"}, {drawSVG:"100%", duration:3.0, ease:"power1.inOut"}, 0.8);
+  tl.to("#dot", {motionPath:{path:"#route", align:"#route", alignOrigin:[0.5,0.5]}, duration:3.0, ease:"power1.inOut"}, 0.8);
+  tl.fromTo("#lbl-forest", {opacity:0, y:14}, {opacity:1, y:0, duration:0.5, ease:"power2.out"}, 1.8);
+  tl.to("#endpin", {attr:{r:22}, duration:0.45, ease:"back.out(2.5)"}, 4.0);
+  tl.fromTo("#lbl-end", {opacity:0, scale:0.8}, {opacity:1, scale:1, duration:0.45, ease:"back.out(1.7)", transformOrigin:"0% 50%"}, 4.05);
+  tl.fromTo("#lbl-end2", {opacity:0}, {opacity:1, duration:0.4}, 4.3);
+  tl.to({}, {duration:0.01}, 7.0);
   window.__timelines = window.__timelines || {};
   window.__timelines["map-route"] = tl;
   tl.seek(0);
