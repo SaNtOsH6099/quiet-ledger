@@ -18,7 +18,7 @@
 </style>
 </head>
 <body>
-<div id="root" data-composition-id="diagram-highlight" data-start="0" data-duration="5" data-width="1080" data-height="1920">
+<div id="root" data-composition-id="diagram-highlight" data-start="0" data-duration="7" data-width="1080" data-height="1920">
 <svg viewBox="0 0 1080 1920" xmlns="http://www.w3.org/2000/svg">
   <rect width="1080" height="1920" fill="#050505"/>
   <text class="lbl-small" x="540" y="540" font-size="30" text-anchor="middle" id="title">HOUSE CROSS-SECTION</text>
@@ -58,7 +58,7 @@
   tl.fromTo("#leader", {drawSVG:"0%"}, {drawSVG:"100%", duration:0.4, ease:"power2.out"}, 3.1);
   tl.fromTo("#lbl, #lbl2", {opacity:0, scale:0.8}, {opacity:1, scale:1, duration:0.45, stagger:0.08, ease:"back.out(1.7)", transformOrigin:"0% 50%"}, 3.3);
   tl.fromTo("#foot", {opacity:0}, {opacity:1, duration:0.4}, 3.8);
-  tl.to({}, {duration:0.01}, 5.0);
+  tl.to({}, {duration:0.01}, 7.0);
   window.__timelines = window.__timelines || {};
   window.__timelines["diagram-highlight"] = tl;
   tl.seek(0);
