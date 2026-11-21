@@ -30,6 +30,16 @@ on:
         description: "Output filename (no extension), e.g. case1-still-to-still-v1"
         required: true
         type: string
+      renderer:
+        description: "Renderer file under transition-test/, default infinite_zoom.py (v2: infinite_zoom_v2.py)"
+        required: false
+        type: string
+        default: "infinite_zoom.py"
+      spec_file:
+        description: "Spec file under transition-test/, empty = cases/case<id>.json (v2: transition-test/cases/case1-v2.json)"
+        required: false
+        type: string
+        default: ""
 
 permissions:
   contents: read
@@ -71,8 +81,10 @@ jobs:
       - name: render case
         run: |
           mkdir -p out
-          python3 transition-test/infinite_zoom.py \
-            --spec "transition-test/cases/case${{ inputs.case_id }}.json" \
+          SPEC="${{ inputs.spec_file }}"
+          if [ -z "$SPEC" ]; then SPEC="transition-test/cases/case${{ inputs.case_id }}.json"; fi
+          python3 "transition-test/${{ inputs.renderer }}" \
+            --spec "$SPEC" \
             --in-dir in \
             --out "out/${{ inputs.out_name }}.mp4"
           ffprobe -v error -select_streams v:0 \
@@ -81,7 +93,7 @@ jobs:
           ls -lh out/
       - uses: actions/upload-artifact@v4
         with:
-          name: transition-case${{ inputs.case_id }}
+          name: transition-case${{ inputs.case_id }}-${{ inputs.out_name }}
           path: out/
           if-no-files-found: error
           retention-days: 1
