@@ -25,11 +25,11 @@
 </style>
 </head>
 <body>
-<div id="root" data-composition-id="date-card" data-start="0" data-duration="5" data-width="1080" data-height="1920">
+<div id="root" data-composition-id="date-card" data-start="0" data-duration="6" data-width="1080" data-height="1920">
   <div class="card" id="card">
     <div class="rule" id="rule"></div>
-    <div class="day" id="day">27</div>
-    <div class="month" id="month">JANUARY</div>
+    <div class="day" id="day">26</div>
+    <div class="month" id="month">DECEMBER</div>
     <div class="year" id="year">1980</div>
     <div class="place" id="place">RENDLESHAM FOREST &middot; SUFFOLK</div>
     <div class="rule2" id="rule2"></div>
@@ -47,8 +47,8 @@
   tl.fromTo(sy.chars, {opacity:0, y:34, scale:1.15}, {opacity:1, y:0, scale:1, duration:0.35, stagger:0.09, ease:"back.out(1.6)"}, 1.75);
   tl.fromTo("#place", {opacity:0}, {opacity:1, duration:0.5, ease:"power2.out"}, 2.55);
   tl.fromTo("#rule2", {scaleX:0}, {scaleX:1, duration:0.4, ease:"power3.inOut"}, 2.55);
-  tl.to("#card", {scale:1.015, duration:2.0, ease:"sine.inOut"}, 3.0);
-  tl.to({}, {duration:0.01}, 5.0);
+  tl.to("#card", {scale:1.015, duration:3.0, ease:"sine.inOut"}, 3.0);
+  tl.to({}, {duration:0.01}, 6.0);
   window.__timelines = window.__timelines || {};
   window.__timelines["date-card"] = tl;
   tl.seek(0);
