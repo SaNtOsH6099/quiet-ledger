@@ -51,6 +51,11 @@ on:
         required: false
         type: boolean
         default: false
+      bed:
+        description: "Drone bed filename in the staging folder (e.g. drone_bed.wav); empty = voice-only, no bed"
+        required: false
+        type: string
+        default: ""
 
 permissions:
   contents: read
@@ -217,11 +222,21 @@ jobs:
           # captioned path the captions-artifact download creates it,
           # but when skip_captions skips that download nothing does.
           mkdir -p out
+          # Drone bed (Gate 4 experiment): the bed WAV is staged in
+          # the per-video folder (e.g. drone_bed.wav) and named by the
+          # `bed` dispatch input; empty (the default) = voice-only.
+          # The assemble script fails loudly if the named file is not
+          # in the staging folder.
+          BED_ARG=""
+          if [ -n "${{ inputs.bed }}" ]; then
+            BED_ARG="--bed in/${{ inputs.bed }}"
+          fi
           if [ "${{ inputs.skip_captions }}" = "true" ]; then
             python3 -m pipeline-v2.render.echoes_assemble_v2 \
               --segments-dir in/clips \
               --segment-map in/segment_map.json \
               --audio in/narration_mix.wav \
+              $BED_ARG \
               --out "out/${{ inputs.final_name }}.mp4"
           else
             # Hormozi captions produce a plates file alongside the text
@@ -238,6 +253,7 @@ jobs:
               $PLATES_ARG \
               --captions-json in/captions.json \
               --audio in/narration_mix.wav \
+              $BED_ARG \
               --out "out/${{ inputs.final_name }}.mp4"
           fi
       - name: record size, duration, loudness
