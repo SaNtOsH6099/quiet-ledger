@@ -74,6 +74,14 @@ audit gap in AUDIT.md):
      log) yet the fade ran at half rate on that runner, so a correct
      filter is not enough: the render must fail loudly here instead
      of shipping mid-fade.
+  DRONE BED (Gate 4 experiment, 2026-11-21): --bed takes a drone-bed
+     wav (24kHz mono, -43 LUFS, one per video, matched to its topic).
+     The bed is mixed under the narration at Gate 4 (trimmed to the
+     video duration, 2s fade-out, amix normalize=0) so the loudnorm
+     measures the combined mix. Gate 3 captions run on the voice-only
+     mix — the bed fills the narration gaps (gap floor ~-37 dBFS), so
+     Gate 3 must never see the bed. Omit --bed for a voice-only
+     render (the default); without it the audio path is byte-identical.
 
 This follows the local 24 fps chain used for videos 65-78 (see
 ~/workspace/video-tools/antikythera-79/work/assemble_clean.sh and
@@ -104,6 +112,10 @@ per-video Drive folder in quiet-ledger, fetched by echoes_intake.py):
                     layer is screened on top. Omit for legacy captions
                     (no plates file exists) and for caption-free renders.
   --audio         narration mix wav (Gemini Kore, one take, -23 LUFS mix)
+  --bed           drone bed wav (24kHz mono, -43 LUFS, 90s master):
+                    mixed under the narration at Gate 4 (trimmed to
+                    the video duration, 2s fade-out); omit for a
+                    voice-only render (default)
   --out           final mp4
 
 Steps:
@@ -284,6 +296,43 @@ def measure_loudness(path):
     return json.loads(m.group(0))
 
 
+def mix_bed(narration, bed, duration, out):
+    """Mix a drone bed under the narration (Gate 4, drone-bed experiment).
+
+    The bed is trimmed to `duration` (the video/concat duration), faded
+    out over the last 2s, and mixed with the narration at its natural
+    level (the bed is already ~20 dB below the voice, -43 LUFS vs
+    -23 LUFS) with amix normalize=0 — the chain the test mixes were
+    built with. The combined mix is then loudnormed by the existing
+    finish step, exactly as the voice-only mix is today.
+    The bed must cover the video: a bed shorter than `duration` is a
+    staging defect — fail loudly, never loop it (a loop seam in a
+    drone would be audible). The fade-out ends at the video end, not
+    the narration end (the test mixes faded at the narration end,
+    0.3s earlier — the difference is inaudible, and the bed should
+    underscore the whole video including its tail fade).
+    """
+    bed_dur = probe_audio_duration(bed)
+    if bed_dur < duration:
+        raise SystemExit(
+            f"drone bed {bed} is {bed_dur:.2f}s, shorter than the video "
+            f"{duration:.2f}s — stage a bed that covers the video")
+    fade_start = duration - 2.0
+    run(["ffmpeg", "-y", "-v", "error",
+         "-i", narration, "-i", bed,
+         "-filter_complex",
+         f"[1:a]atrim=0:{duration:.3f},"
+         f"afade=t=out:st={fade_start:.3f}:d=2[bed];"
+         f"[0:a][bed]amix=inputs=2:normalize=0[mix]",
+         "-map", "[mix]", "-c:a", "pcm_s16le", out])
+    got = probe_audio_duration(out)
+    if abs(got - duration) > 0.1:
+        raise SystemExit(
+            f"bed mix is {got:.2f}s, expected {duration:.2f}s — "
+            f"the bed mix did not cover the video")
+    return out
+
+
 def last_frame_luma(path):
     """Mean RGB luma (Rec.601) of the final frame of a video file.
 
@@ -369,6 +418,11 @@ def main():
                              "tail freeze (G1); required when --captions "
                              "is given")
     parser.add_argument("--audio", required=True, help="narration mix wav")
+    parser.add_argument("--bed", required=False, default=None,
+                        help="drone bed wav (24kHz mono, -43 LUFS): "
+                             "mixed under the narration at Gate 4, "
+                             "trimmed to the video duration with a 2s "
+                             "fade-out; omit for a voice-only render")
     parser.add_argument("--out", required=True)
     parser.add_argument("--work-dir", default="work/assemble")
     parser.add_argument("--verify-only", action="store_true",
@@ -392,6 +446,8 @@ def main():
         raise SystemExit(f"--captions-plates file not found: "
                          f"{args.captions_plates} (legacy captions produce "
                          f"no plates file — omit the argument instead)")
+    if args.bed and not os.path.exists(args.bed):
+        raise SystemExit(f"--bed file not found: {args.bed}")
 
     # The final encode writes to --out (usually out/<final>.mp4). When the
     # captions job is skipped there is no captions artifact download to
@@ -488,6 +544,20 @@ def main():
                     args.captions_json, args.captions_plates)
                 print(f"verify-only: plates last full-opacity frame "
                       f"{last_full_p}")
+        if args.bed:
+            # DRONE BED: the bed must cover the video (the concat
+            # duration). Its loudness/level are the bed builder's
+            # verified numbers (-43 LUFS, ~20 dB below the voice) —
+            # verify-only checks coverage only; the mix is built and
+            # loudnormed by the encode path.
+            bed_dur = probe_audio_duration(args.bed)
+            print(f"verify-only: drone bed {args.bed} {bed_dur:.2f}s "
+                  f"vs video {concat_dur:.2f}s")
+            if bed_dur < concat_dur:
+                raise SystemExit(
+                    f"verify-only: drone bed is {bed_dur:.2f}s, shorter "
+                    f"than the video {concat_dur:.2f}s — stage a bed "
+                    f"that covers the video")
         print("verify-only: PASS")
         return 0
 
@@ -633,9 +703,21 @@ def main():
     # audio is padded with silence to the video length instead:
     # the mix ends 0.2s after the last word and apad adds the rest,
     # so the tail is ~0.5s of MOVING video under the fade.
+    # DRONE BED (Gate 4 experiment): mix the bed under the narration
+    # BEFORE the mux, so the loudnorm measures the combined mix (the
+    # test mixes proved this normalizes cleanly to -23 LUFS). The bed
+    # is trimmed to the video (concat) duration with a 2s fade-out.
+    # Without --bed, audio_path is the narration exactly as today —
+    # the mux command is byte-identical.
+    audio_path = args.audio
+    if args.bed:
+        audio_path = mix_bed(args.audio, args.bed, concat_dur,
+                             os.path.join(args.work_dir, "mix_with_bed.wav"))
+        print(f"drone bed mixed: {args.bed} under {args.audio} "
+              f"({concat_dur:.2f}s)")
     with_audio = os.path.join(args.work_dir, "with_audio.mp4")
     run(["ffmpeg", "-y", "-v", "error",
-         "-i", silent, "-i", args.audio,
+         "-i", silent, "-i", audio_path,
          "-filter_complex",
          f"[1:a]apad=whole_dur={concat_dur:.3f}[a]",
          "-map", "0:v", "-map", "[a]",
