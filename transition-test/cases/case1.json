@@ -1,0 +1,4 @@
+{"case": 1, "mode": "still->still",
+ "a_still": "69-B4a-house-v1.jpg", "b_still": "69-B4b-creature-v1.jpg",
+ "portal_x": 0.20, "portal_y": 0.44,
+ "hold_a_s": 2.0, "zoom_s": 2.5, "hold_b_s": 2.0}
