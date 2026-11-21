@@ -1,0 +1,83 @@
+# echoes-transition-test: infinite-zoom beat-transition prototype.
+# SEPARATE workflow — does not touch echoes-render-v2.yml,
+# echoes-render.yml, echoes_assemble_v2.py or echoes_intake.py.
+# One dispatch per case (1-4). Inputs come from a Drive staging folder
+# via the existing pipeline.drive.echoes_intake (shared infra, called
+# not modified); the renderer + case specs live in transition-test/ in
+# this repo. Output is one mp4 artifact, retention 1 day (public repo).
+# No captions, no narration, no cinema finish — silent visual test.
+name: echoes-transition-test
+
+run-name: "Transition test case ${{ inputs.case_id }}"
+
+on:
+  workflow_dispatch:
+    inputs:
+      case_id:
+        description: "Case id: 1 still->still, 2 still->clip, 3 clip->still, 4 clip->clip"
+        required: true
+        type: choice
+        options: ["1", "2", "3", "4"]
+      drive_folder_id:
+        description: "Staging folder id in Drive (infinite-zoom-test-staging)"
+        required: true
+        type: string
+      out_name:
+        description: "Output filename (no extension), e.g. case1-still-to-still-v1"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  render:
+    name: render transition case ${{ inputs.case_id }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: reject stdlib-shadowing filenames
+        run: python3 -m pipeline.tools.check_no_shadow
+      - name: install Drive tools
+        run: python3 -m pip install -q -r requirements/drive.txt
+      - name: fetch the locked inputs
+        env:
+          DRIVE_OAUTH_JSON: ${{ secrets.DRIVE_OAUTH_JSON }}
+          DRIVE_FOLDER_ID: ${{ secrets.DRIVE_FOLDER_ID }}
+        run: |
+          python3 -m pipeline.drive.echoes_intake \
+            --drive-folder-id "${{ inputs.drive_folder_id }}" \
+            --out-dir in/
+          ls -lh in/
+      - name: install infinite-zoom renderer (OpenCV)
+        run: python3 -m pip install -q opencv-python-headless==5.1.0.95 numpy==2.5.5
+      - name: install ffmpeg
+        timeout-minutes: 20
+        run: |
+          for i in 1 2 3; do
+            sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg && break
+            echo "ffmpeg install attempt $i failed, retrying in 30s..."
+            sleep 30
+          done
+          ffmpeg -version | head -1
+      - name: render case
+        run: |
+          mkdir -p out
+          python3 transition-test/infinite_zoom.py \
+            --spec "transition-test/cases/case${{ inputs.case_id }}.json" \
+            --in-dir in \
+            --out "out/${{ inputs.out_name }}.mp4"
+          ffprobe -v error -select_streams v:0 \
+            -show_entries stream=width,height,r_frame_rate,duration,codec_name \
+            -of default=noprint_wrappers=1 "out/${{ inputs.out_name }}.mp4"
+          ls -lh out/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: transition-case${{ inputs.case_id }}
+          path: out/
+          if-no-files-found: error
+          retention-days: 1
