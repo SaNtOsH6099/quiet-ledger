@@ -2,9 +2,13 @@
 # SEPARATE workflow — does not touch echoes-render-v2.yml,
 # echoes-render.yml, echoes_assemble_v2.py or echoes_intake.py.
 # One dispatch per case (1-4). Inputs come from a Drive staging folder
-# via the existing pipeline.drive.echoes_intake (shared infra, called
-# not modified); the renderer + case specs live in transition-test/ in
-# this repo. Output is one mp4 artifact, retention 1 day (public repo).
+# via transition-test/intake.py (transition-specific: downloads every
+# file in the folder, no segment_map / captions / narration
+# requirement — the shared pipeline.drive.echoes_intake REQUIRES those
+# and can never pass for this test; run 44893661572 failed at exactly
+# that step, "fetch the locked inputs"); the renderer + case specs
+# live in transition-test/ in this repo. Output is one mp4 artifact,
+# retention 1 day (public repo).
 # No captions, no narration, no cinema finish — silent visual test.
 name: echoes-transition-test
 
@@ -44,12 +48,12 @@ jobs:
         run: python3 -m pipeline.tools.check_no_shadow
       - name: install Drive tools
         run: python3 -m pip install -q -r requirements/drive.txt
-      - name: fetch the locked inputs
+      - name: fetch the transition inputs
         env:
           DRIVE_OAUTH_JSON: ${{ secrets.DRIVE_OAUTH_JSON }}
           DRIVE_FOLDER_ID: ${{ secrets.DRIVE_FOLDER_ID }}
         run: |
-          python3 -m pipeline.drive.echoes_intake \
+          python3 transition-test/intake.py \
             --drive-folder-id "${{ inputs.drive_folder_id }}" \
             --out-dir in/
           ls -lh in/
