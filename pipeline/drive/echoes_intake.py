@@ -23,6 +23,11 @@ per-video side chat:
                     full shot; the captions job injects it into BOTH
                     caption layers before the render. Absent = the video
                     has no hook text.
+  drone_bed.wav     OPTIONAL: a per-video drone bed (24kHz mono, -43 LUFS,
+                    matched to the video's topic — the Gate 4 drone-bed
+                    experiment). The assemble job mixes it under the
+                    narration when the dispatch `bed` input names it;
+                    absent = the video is voice-only.
 
 Auth is OAuth as the user (DRIVE_OAUTH_JSON). A service account cannot
 create files in a personal Drive folder, and is not used here.
@@ -141,6 +146,20 @@ def main():
         dest = os.path.join(args.out_dir, "hook_text.json")
         download_file(service, by_name["hook_text.json"]["id"], dest)
         print(f"hook_text.json: {os.path.getsize(dest)} bytes")
+
+    # Drone bed: optional. When the staging folder holds a
+    # drone_bed.wav (a per-video drone bed, -43 LUFS, matched to the
+    # video's topic — the Gate 4 drone-bed experiment), the intake
+    # fetches it so the assemble job can mix it under the narration;
+    # without it the render is voice-only. Absent = the video has no
+    # bed. The bed is staged under the fixed name drone_bed.wav (like
+    # narration_mix.wav); the dispatch `bed` input names it for the
+    # assemble step, and the assemble script fails loudly if the named
+    # file was not fetched.
+    if "drone_bed.wav" in by_name:
+        dest = os.path.join(args.out_dir, "drone_bed.wav")
+        download_file(service, by_name["drone_bed.wav"]["id"], dest)
+        print(f"drone_bed.wav: {os.path.getsize(dest)} bytes")
 
     seg_map = json.load(open(os.path.join(args.out_dir, "segment_map.json")))
     missing = [s["file"] for s in seg_map
