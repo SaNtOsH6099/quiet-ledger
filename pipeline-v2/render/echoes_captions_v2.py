@@ -1,18 +1,19 @@
 #!/usr/bin/env python3
 """Render Echoes caption karaoke at 24 fps (HyperFrames wrapper), v2.
 
-DRAFT — NOT YET TESTED IN ACTIONS. Derived from pipeline/render/
+Live on GitHub (SaNtOsH6099/quiet-ledger, main) — the v2 workflow has
+run 54 times, including 79 and 80 v2. Derived from pipeline/render/
 echoes_captions.py (v1) on 2026-11-18. v2 changes (audit gaps in
 AUDIT.md):
   G2 pause audit + check 6: the v1 builder has neither. v2 uses the
      SYNCED local builder (echoes-hyperframes-v2/tools/
-     build_captions_hormozi.py — byte-identical to the local builder
-     as of 2026-11-18, with lesson-41 TEST 1/2/2b behind --mix and
-     lesson-43 check 6). The workflow passes the locked narration
-     mix with --mix, so a mistimed word fails the build here, not
-     at Gate 3. --mix is REQUIRED in v2: the audit is not optional.
-     The validator below also enforces check 6 directly, so a
-     duplicate-start file fails before the builder runs.
+     build_captions_hormozi.py — byte-identical to the local builder,
+     with lesson-41 TEST 1/2/2b behind --mix and lesson-43 check 6).
+     The workflow passes the locked narration mix with --mix, so a
+     mistimed word fails the build here, not at Gate 3. --mix is
+     REQUIRED in v2 for the Hormozi builder: the audit is not
+     optional. The validator below also enforces check 6 directly, so
+     a duplicate-start file fails before the builder runs.
   G2b GEAR extension: RMS-settling EVERY disputed word (>0.15s
      base/small disagreement) is still a LOCAL per-video step — the
      GitHub job receives only captions.json, never the Whisper
@@ -21,6 +22,20 @@ AUDIT.md):
      RMS-settled one. The pause audit + check 6 catch the silence
      and duplicate classes; the mid-phrase disagreement class
      depends on the local step having been done.
+  Legacy guards (2026-11-24, caption tooling build): validate_legacy
+     now enforces the same token-level rules as the legacy builder
+     (caption_checks.py, shared with both builders and the grouping
+     helper) — lesson-88 (0.13s floor / 0.17s bar, with the
+     documented-exception mechanism), 0.8s floor for non-hook groups,
+     G0 first word at 0.00, keyword cap (max 4, target 3), width
+     assert (Archivo Black, 810px box, max 2 lines), 2-6 words sized
+     by rendered width (rule 62, fit-based). The legacy builder does
+     NOT take --mix (it takes exactly 3 argv); the wrapper no longer
+     passes it for legacy. Date cards and hook text are injected into
+     the legacy composition too (the injectors are format-agnostic
+     since 2026-11-24) — the old Hormozi-only rejection is lifted
+     because 81+ videos use date cards and hook text under the new
+     method (frame-0 text is mandatory; time jumps take date cards).
 
 Inputs:
   --captions-json  captions.json: a list of caption groups measured
@@ -46,8 +61,14 @@ FORMATS
                     "word_starts": [0.0, 0.4, 0.9, 1.5],
                     "size_px": 70, "bottom_px": 670, "break_after": 2}
                    Styles: punch, standard, list, split, question,
-                   quick. 3-5 words, Archivo Black, 60-90px,
-                   bottom 670-850 (lower third), keyword gold #FFD166.
+                   quick. 2-6 words, sized by rendered width (rule 62:
+                   fill the 810px box, target ~4 words, fewer for long
+                   words, more for short ones — never a fixed word
+                   count), Archivo Black, 60-90px, bottom 670-850
+                   (lower third), keyword gold #FFD166, at most 4
+                   groups with a keyword (target 3). First word at
+                   0.00s on frame 0; every word >= 0.17s before its
+                   group end (lesson 88); groups >= 0.8s (hook exempt).
   HORMOZI (56 rebuild onwards — the CURRENT style; 62's GitHub
                    render failed on 2026-11-16 because this wrapper
                    only knew the legacy styles): each group
@@ -139,34 +160,32 @@ def detect_format(captions):
     return "legacy"
 
 
-def validate_legacy(captions):
+def validate_legacy(captions, tools_dir, font_path):
+    """Validate a legacy captions file against the same token-level
+    rules the legacy builder enforces (caption_checks.py, shared with
+    both builders and the grouping helper), plus the legacy
+    style/size/bottom ranges. `tools_dir` is the project's tools/
+    directory (where caption_checks.py lives); `font_path` is the
+    Archivo Black TTF the width assert measures with. A valid
+    documented lesson-88 exception prints a WARNING but passes."""
     if not isinstance(captions, list) or not captions:
         fail("captions file must be a non-empty JSON list")
-    prev_end = None
+    if tools_dir not in sys.path:
+        sys.path.insert(0, tools_dir)
+    try:
+        import caption_checks as cc
+    except ImportError as e:
+        fail(f"caption_checks.py is required ({tools_dir}): {e}")
+    if not os.path.exists(font_path):
+        fail(f"Archivo Black font missing: {font_path} — the width "
+             f"assert cannot be proven without the renderer's font")
+    violations, warnings = cc.validate_captions(captions, font_path)
+    for w in warnings:
+        print(f"echoes_captions: WARNING: {w}")
+    if violations:
+        fail("legacy caption validation failed:\n  " + "\n  ".join(violations))
+    # Legacy style/size/bottom ranges (the builder's own geometry).
     for i, cap in enumerate(captions):
-        text = cap.get("text", "")
-        if EM_DASH in text or "--" in text:
-            fail(f"caption {i}: em dash found in {text!r} (never allowed)")
-        words = text.split()
-        if not (3 <= len(words) <= 5):
-            fail(f"caption {i}: {len(words)} words, must be 3-5: {text!r}")
-        start, end = float(cap["start"]), float(cap["end"])
-        if cap.get("word_starts"):
-            if len(cap["word_starts"]) != len(words):
-                fail(f"caption {i}: word_starts length != word count")
-            if end - start < 0.5:
-                fail(f"caption {i}: duration {end - start}s, must be >= 0.5s")
-        elif end - start < 1.5:
-            fail(f"caption {i}: duration {end - start}s, must be >= 1.5s")
-        if prev_end is not None and start < prev_end - 1e-9:
-            fail(f"caption {i}: overlaps previous caption")
-        if i == 0 and start != 0.0:
-            fail("first caption must start at 0.0s (no slow opening)")
-        keyword = cap.get("keyword")
-        if keyword:
-            clean = lambda w: "".join(c for c in w if c.isalnum() or c == "'")
-            if clean(keyword).lower() not in [clean(w).lower() for w in words]:
-                fail(f"caption {i}: keyword {keyword!r} is not in {text!r}")
         if cap.get("style", "standard") not in LEGACY_STYLES:
             fail(f"caption {i}: unknown style {cap.get('style')!r}")
         size = float(cap.get("size_px", 70))
@@ -175,7 +194,6 @@ def validate_legacy(captions):
         bottom = float(cap.get("bottom_px", 670))
         if not 670 <= bottom <= 850:
             fail(f"caption {i}: bottom_px {bottom} outside 670-850 (safe band)")
-        prev_end = end
     print(f"validated {len(captions)} captions (legacy), "
           f"total {max(float(c['end']) for c in captions):.2f}s")
 
@@ -298,20 +316,30 @@ def main():
                         help="HyperFrames caption project (to be ported)")
     parser.add_argument("--mix", required=False, default=None,
                         help="locked narration mix wav: REQUIRED in v2 "
-                             "(lesson-41 pause audit runs on it); the "
-                             "build fails without it")
+                             "for the Hormozi builder (lesson-41 pause "
+                             "audit runs on it); the legacy builder does "
+                             "not take it (exactly 3 argv), so the wrapper "
+                             "does not pass it for legacy")
     parser.add_argument("--date-cards", required=False, default=None,
-                        help="date_cards.json (optional, Hormozi only): "
-                             "Director-plan date cards injected into both "
-                             "caption layers before the render; absent = "
-                             "no cards")
+                        help="date_cards.json (optional): Director-plan "
+                             "date cards injected into the caption layers "
+                             "before the render; absent = no cards")
     parser.add_argument("--hook-text", required=False, default=None,
-                        help="hook_text.json (optional, Hormozi only): "
-                             "Director-plan hook text injected into both "
-                             "caption layers before the render; absent = "
-                             "no hook text")
+                        help="hook_text.json (optional): Director-plan "
+                             "hook text injected into the caption layers "
+                             "before the render; absent = no hook text")
     parser.add_argument("--out", required=True)
     args = parser.parse_args()
+
+    # Absolute paths first: the render step runs with cwd=project_dir,
+    # so a relative script path would be resolved inside the project
+    # dir and not found (caught by the local 79 test, 2026-11-09).
+    # Validation needs them too (the shared checks live in the
+    # project's tools/ dir, and the width assert needs its font).
+    project_dir = os.path.abspath(args.project_dir)
+    tools_dir = os.path.join(project_dir, "tools")
+    font_path = os.path.join(
+        project_dir, "assets", "fonts", "ArchivoBlack-Regular.ttf")
 
     with open(args.captions_json) as f:
         captions = json.load(f)
@@ -319,12 +347,8 @@ def main():
     if fmt == "hormozi":
         validate_hormozi(captions)
     else:
-        validate_legacy(captions)
+        validate_legacy(captions, tools_dir, font_path)
 
-    # Absolute paths: the render step runs with cwd=project_dir, so a
-    # relative script path would be resolved inside the project dir
-    # and not found (caught by the local 79 test, 2026-11-09).
-    project_dir = os.path.abspath(args.project_dir)
     render = os.path.join(project_dir, "tools", "render_captions_24fps.sh")
     if fmt == "hormozi":
         build = os.path.join(project_dir, "tools", "build_captions_hormozi.py")
@@ -339,21 +363,26 @@ def main():
             "nothing was rendered."
         )
     # Ported project present: build the composition, render at 24 fps.
-    # v2: the pause audit is NOT optional. The mix is in the inputs
-    # artifact (intake always fetches a narration wav); a missing mix
-    # fails here rather than letting a mistimed word reach the renderer.
-    if args.mix is None:
-        fail("--mix is required in v2 (lesson-41 pause audit)")
-    if not os.path.exists(args.mix):
-        fail(f"--mix file not found: {args.mix}")
+    # v2: for Hormozi the pause audit is NOT optional. The mix is in
+    # the inputs artifact (intake always fetches a narration wav); a
+    # missing mix fails here rather than letting a mistimed word reach
+    # the renderer. The legacy builder takes exactly 3 argv and runs
+    # no audio audit, so --mix is Hormozi-only: it is required for
+    # Hormozi and simply not passed for legacy.
+    if fmt == "hormozi":
+        if args.mix is None:
+            fail("--mix is required in v2 for Hormozi (lesson-41 pause audit)")
+        if not os.path.exists(args.mix):
+            fail(f"--mix file not found: {args.mix}")
     os.makedirs(os.path.dirname(os.path.abspath(args.out)), exist_ok=True)
     if fmt == "legacy":
-        if args.date_cards is not None:
-            fail("--date-cards is Hormozi only (legacy captions have no date cards)")
-        if args.hook_text is not None:
-            fail("--hook-text is Hormozi only (legacy captions have no hook text)")
+        # One layer (legacy has no plates). Date cards and hook text
+        # are injected into the legacy composition by the same
+        # injectors (format-agnostic since 2026-11-24); --mix is not
+        # passed — the legacy builder rejects extra argv.
         rendered = render_layer(build, args.captions_json, project_dir, [],
-                                mix=args.mix)
+                                mix=None, date_cards_path=args.date_cards,
+                                hook_text_path=args.hook_text)
         os.replace(rendered, args.out)
         print(f"wrote {args.out}")
         return 0
