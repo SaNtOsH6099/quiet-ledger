@@ -18,6 +18,19 @@ Method rules (lessons file ~/workspace/user/files/echoes-clip-lessons.md):
     the still and BORDER_REPLICATE smears a stripe down the edge.
     Enforced here by an assert in validate_kenburns_spec; the last
     frame is still checked by eye at review (MAD does not catch smears).
+  lesson 184 (landscape sources, 80 Gate 4 A2, 2026-11-24): the crop
+    scale s MUST be min(bw/OUT_W, bh/OUT_H)/zoom so the crop window
+    fits inside the still in BOTH dimensions. The old s = (bw/OUT_W)/zoom
+    assumed a 9:16 source (where the two ratios are equal); on a
+    landscape still (3840x2560) the crop height was 2.667x the image
+    height and BORDER_REPLICATE smeared the top and bottom quarters of
+    every frame (80 S3a/S3b/S4a, 7.33-17.58s) while the validator passed
+    the specs — the lesson-50 clamp only checks centres, never the
+    crop size. max(...) would keep the broken value; min is the fix.
+    For 9:16 sources the two ratios are equal, so this changes nothing
+    on the shipped path. The 1/(2z) clamp stays conservative on the
+    non-binding axis for non-9:16 sources (it may reject a legal
+    off-centre centre; it never accepts a smearing one).
   lesson 46: NO fps filter anywhere in a GitHub-rendered path (ffmpeg
     6.1.1 drops the last frame under fps=24); the rate is pinned by
     "-r 24" on the ffmpeg output, never a filter.
@@ -189,7 +202,15 @@ def render_kenburns(image, out, dur, spec, ffmpeg="ffmpeg", crf=CRF,
             # inverts it; pass WARP_INVERSE_MAP so M is used as written
             # (dst->src). The prototype's first renders had this wrong
             # (smeared left band + wrong framing) — do not "fix" it.
-            s = (bw / OUT_W) / zoom
+            # Lesson 184: s is the MIN of the two ratios, so the crop
+            # window (OUT_W*s by OUT_H*s) fits inside the big image in
+            # BOTH dimensions. The old s = (bw/OUT_W)/zoom assumed a
+            # 9:16 source; on a landscape still the crop height ran
+            # 2.667x past the image and BORDER_REPLICATE smeared the
+            # top and bottom of every frame. max(...) would keep the
+            # broken value — min is the fix. For 9:16 sources the
+            # ratios are equal, so this is a no-op on that path.
+            s = min(bw / OUT_W, bh / OUT_H) / zoom
             M = np.array([[s, 0, cx - s * OUT_W / 2],
                           [0, s, cy - s * OUT_H / 2]], dtype=np.float64)
             frame = cv2.warpAffine(big, M, (OUT_W, OUT_H),
