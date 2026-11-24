@@ -123,6 +123,18 @@ from pathlib import Path
 
 import numpy as np
 
+# Shared caption checks (caption_checks.py, same dir): the token-level
+# rules — lesson-43 and the corrected lesson-88 — measured the same way
+# by both builders and the grouping helper. The RMS pause audit below
+# (TEST 1 / TEST 2 / TEST 2b) stays here: it needs the audio, and the
+# legacy builder has no mix to run it on.
+try:
+    import caption_checks as cc
+except ImportError as e:
+    raise SystemExit(
+        f"build_captions_hormozi: ERROR: caption_checks.py is required "
+        f"(same dir as this builder): {e}")
+
 EM_DASH = "\u2014"
 YELLOW = "#FFE600"
 # Caption container is left:50px width:980px; a line wider than this
@@ -286,44 +298,11 @@ def main():
     # frames, or the renderer treats same-frame words as one highlight
     # unit and lights them yellow together. (68 v1: base Whisper gave
     # AND as a zero-duration token, so AND and HER shared the start
-    # 55.82 and popped on the same frame.) The enforceable test is no
-    # duplicate starts + each word pops on its own frame at its own
-    # measured time; a sub-0.20s chunk holding yellow together is the
-    # documented SMART CHUNKING behaviour, not a defect.
-    prev_word = None  # (word, caption index, start)
-    for i, cap in enumerate(captions):
-        for j, s in enumerate(cap["word_starts"]):
-            s = float(s)
-            if prev_word is not None and int(prev_word[2] * 24) >= int(s * 24):
-                fail(
-                    f"lesson 43: {prev_word[0]!r} {prev_word[2]:.2f} and "
-                    f"{cap['text'].split()[j]!r} {s:.2f} pop on the same "
-                    f"frame (frame {int(s * 24)}) — settle the onset"
-                )
-            prev_word = (cap["text"].split()[j], i, s)
-
-    # LESSON 88 (Gate 4 FAIL, video 62, 2026-11-20): no word may start
-    # within 2 frames of its group end. The builder fades each group out
-    # over its last ~2 frames (exit_dur 0.12s); a last word starting
-    # inside that window is swallowed — HE 16.05 and IT 19.03 had ZERO
-    # caption frames, THE 51.60 one dimmed frame — while every Gate 3
-    # check (TEST 1, TEST 2b, independent audit) passes, because they
-    # check start times against the audio, never display frames against
-    # the group fade. The check is on the time gap (>= 2/24s), not on
-    # ceil frame arithmetic: THE's gap 0.08s ceils to 2 frames but is
-    # only 1.92 frames, and the frame test would miss it.
-    for i, cap in enumerate(captions):
-        for j, s in enumerate(cap["word_starts"]):
-            s = float(s)
-            gap = float(cap["end"]) - s
-            if gap * 24 < 2 - 1e-9:
-                fail(
-                    f"lesson 88: caption {i} {cap['text']!r} word "
-                    f"{cap['text'].split()[j]!r} at {s:.2f} is {gap:.2f}s "
-                    f"({gap * 24:.2f} frames) before the group end "
-                    f"{float(cap['end']):.2f} — regroup it to the next "
-                    f"group so it gets >=2 full-brightness frames"
-                )
+    # 55.82 and popped on the same frame.) Shared check — see
+    # caption_checks.check_lesson43.
+    bad43 = cc.check_lesson43(captions)
+    if bad43:
+        fail("\n  ".join(bad43))
 
     # PAUSE AUDIT (lesson 41) — only when --mix is given. Flatten the
     # groups to (word, start, end). A word's end is the next word's
@@ -350,6 +329,34 @@ def main():
     else:
         print("WARNING: no --mix given, pause audit (lesson 41, TEST 1 / "
               "TEST 2b) SKIPPED — a mistimed word will reach the renderer")
+
+    # LESSON 88, CORRECTED (Gate 4 re-review, video 62, 2026-11-20):
+    # the exit fade is 0.12s = 2.88 frames, LONGER than the old 2-frame
+    # assertion — a 0.10s (2.40-frame) gap is already inside the fade
+    # when the word pops (FELL/LEAST had zero full-brightness frames
+    # and passed the 2-frame assertion). Measured on the v2 render: a
+    # gap of 0.14s (3.36 frames) buys 1 full frame; 0.19s (4.56
+    # frames) buys 2 full frames. So the bar is now >=0.17s (4 frames)
+    # for 2 full display frames, with a hard floor of >=0.13s (3
+    # frames, 1 full frame — below that is 0 full frames, the defect).
+    # The check is on the time gap, not on ceil frame arithmetic:
+    # THE's gap 0.08s ceils to 2 frames but is only 1.92 frames, and
+    # the frame test would miss it. This runs AFTER the pause audit so
+    # TEST 1 / TEST 2b report first even when the assertion fails.
+    # NOTE: 62's v4 carries three documented 1-full-frame exceptions
+    # (WHEN 32.62, IN 51.46, ONE 35.00 — verified by pixel count in
+    # the Gate 4 v2 verdict, accepted under the v1 line, not regrouped
+    # per the Hub's fix scope), which this builder does NOT know about
+    # — it will fail on them. That is the assertion working as the
+    # systemic rule for future videos; the per-video producer builder
+    # carries the documented exceptions for 62. A future video must
+    # regroup any word under 0.17s — or document an exception on the
+    # caption itself (see caption_checks.check_lesson88). Shared check.
+    bad88, warn88 = cc.check_lesson88(captions)
+    for w in warn88:
+        print(f"build_captions_hormozi: WARNING: {w}")
+    if bad88:
+        fail("\n  ".join(bad88))
 
     # READABILITY RULE (user feedback 2026-11-14): a group that flashes
     # too fast to read is merged with the next group, so the combined
