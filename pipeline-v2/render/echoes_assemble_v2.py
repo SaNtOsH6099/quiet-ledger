@@ -364,13 +364,23 @@ def last_frame_luma(path):
 
 
 def blur_fill_filter(width, height):
-    """Blur-fill a (usually landscape) clip into 1080x1920."""
+    """Blur-fill a (usually landscape) clip into 1080x1920.
+
+    SAR (73 Gate 4, 2026-11-24): scale preserves the input's display
+    aspect by adjusting the output SAR, so a source that is not
+    exactly 9:16 (a 704x1248 generator clip, a 2049x3644 still) comes
+    out with a non-1:1 SAR (73's seg00: 3196:3195) while exact-9:16
+    sources stay 1:1 — and the concat filter refuses to join
+    mismatched SARs (ffmpeg EINVAL -22). setsar=1 after each scale
+    pins every segment square-pixel; on a 1:1 input it is a no-op,
+    and it changes metadata only, never pixels.
+    """
     fg_h = round(1080 * height / width)
     fg_y = (1920 - fg_h) // 2
     return (
         "[0:v]scale=1080:1920:force_original_aspect_ratio=increase,"
-        "crop=1080:1920,gblur=sigma=40,eq=brightness=-0.25[bg];"
-        f"[0:v]scale=1080:{fg_h}[fg];"
+        "crop=1080:1920,setsar=1,gblur=sigma=40,eq=brightness=-0.25[bg];"
+        f"[0:v]scale=1080:{fg_h},setsar=1[fg];"
         f"[bg][fg]overlay=(W-w)/2:{fg_y},format=yuv420p"
     )
 
@@ -386,11 +396,17 @@ def concat_segments(trimmed, out):
     streams through, so the total is exactly the sum of the segment
     frames on any ffmpeg version. All segments are 1080x1920
     yuv420p 24 fps by construction, so the filter takes them directly.
+    SAR guard (73 Gate 4): every input is forced setsar=1 before the
+    concat, so a segment whose encoder wrote a non-1:1 SAR (73's seg00
+    at 3196:3195) can never fail the join again — the KB path bypasses
+    blur-fill, so this is the only place all paths meet. On 1:1
+    inputs it is a no-op.
     """
     inputs = []
     for p in trimmed:
         inputs += ["-i", p]
-    filt = "".join(f"[{k}:v]" for k in range(len(trimmed)))
+    filt = "".join(f"[{k}:v]setsar=1[v{k}];" for k in range(len(trimmed)))
+    filt += "".join(f"[v{k}]" for k in range(len(trimmed)))
     filt += (f"concat=n={len(trimmed)}:v=1:a=0,"
              "format=yuv420p[v]")
     run(["ffmpeg", "-y", "-v", "error", *inputs,
