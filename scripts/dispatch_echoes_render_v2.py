@@ -65,6 +65,12 @@ def main():
     parser.add_argument("--skip-captions", action="store_true",
                         help="caption-free render: skip the captions "
                              "job and overlay")
+    parser.add_argument("--bed", default="",
+                        help="drone bed filename in the staging folder "
+                             "(e.g. drone_bed.wav); empty = voice-only. "
+                             "73 Gate 4: the first dispatch omitted this "
+                             "and shipped voice-only despite the bed being "
+                             "staged — ALWAYS pass it when a bed is staged.")
     args = parser.parse_args()
 
     res = gh("POST",
@@ -74,6 +80,7 @@ def main():
                          "drive_folder_id": args.drive_folder_id,
                          "video_title": args.video_title,
                          "final_name": args.final_name,
+                         "bed": args.bed,
                          "skip_captions": ("true" if args.skip_captions
                                            else "false")}})
     print("dispatched echoes-render-v2 on main:", res or "OK")
