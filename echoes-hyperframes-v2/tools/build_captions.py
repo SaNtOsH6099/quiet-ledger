@@ -6,17 +6,33 @@ Usage:
 
 Input JSON: a list of captions, each with:
     start (seconds, float), end (seconds, float),
-    text (string, 3-5 words, NO em dash),
+    text (string, 2-6 words sized by rendered width — see below,
+      NO em dash),
     keyword (optional, one word from the text, highlighted in gold)
     style (optional, dedicated per-video plan): punch, standard, list,
       split, question, quick — controls size, position, entrance and
       line break. size_px (60-90, default 70), bottom_px (670-850,
       default 670, larger = higher in the safe band), break_after
       (optional word index after which to break the line).
-    Durations are per-caption (human pace), minimum 1.5s for a 3-word
-    phrase, longer for reveals and the closing question; the first word
-    of every caption is set visible at its start so no blank frame
-    occurs at a caption change.
+    Durations are per-caption (human pace). A word-synced group
+    (word_starts present) must be >= 0.8s, except group 0 (hook);
+    a group without word_starts must be >= 1.5s. The first word of
+    every caption is set visible at its start so no blank frame
+    occurs at a caption change; the first caption starts at 0.0s
+    and its first word_starts entry is 0.00 (first word on frame 0).
+    Every word must start >= 0.17s before its group end (lesson 88,
+    2 full display frames), hard floor 0.13s — with a documented
+    per-caption exception mechanism (see caption_checks.py). At most
+    4 groups may carry a keyword (target 3). Chunk size is decided
+    by rendered WIDTH (rule 62, user correction 2026-11-24): fill
+    the line up to the safe width (810px, the caption box), always
+    leaving side margins, so long words never clip at the frame
+    edges; about 4 words is the target, fewer for long words, more
+    for short ones. Every rendered line is measured with the SAME
+    Archivo Black TTF the renderer embeds, at the group's size_px.
+    All of these guards live in caption_checks.py (same dir) and
+    are shared with the Hormozi builder and the grouping helper,
+    so all three measure the same way.
 
 Output: a self-contained 1080x1920 HyperFrames composition (index.html)
 using GSAP, following the project AGENTS.md contract:
@@ -71,31 +87,29 @@ def main():
     if not isinstance(captions, list) or not captions:
         fail("captions file must be a non-empty JSON list")
 
-    prev_end = None
+    # Shared guards (caption_checks.py, same dir): the token-level
+    # rules — lesson-88, 0.8s floor, G0, keyword cap, width, fragments,
+    # lesson-43 — measured the same way by both builders and the
+    # grouping helper. A warning is a valid documented lesson-88
+    # exception (the word passes, but the log must show it).
+    try:
+        import caption_checks as cc
+    except ImportError as e:
+        fail(f"caption_checks.py is required (same dir as this builder): {e}")
+    project_root = Path(__file__).resolve().parent.parent
+    font_path = project_root / "assets" / "fonts" / "ArchivoBlack-Regular.ttf"
+    if not font_path.exists():
+        fail(f"Archivo Black font missing: {font_path} — the width assert "
+             f"cannot be proven without the renderer's font")
+    violations, warnings = cc.validate_captions(captions, font_path)
+    for w in warnings:
+        print(f"build_captions: WARNING: {w}")
+    if violations:
+        fail("caption validation failed:\n  " + "\n  ".join(violations))
+
+    # Builder-specific checks (style/size/bottom ranges — the legacy
+    # builder's own geometry, not shared with the Hormozi builder).
     for i, cap in enumerate(captions):
-        text = cap.get("text", "")
-        if EM_DASH in text or "--" in text:
-            fail(f"caption {i}: em dash found in {text!r} (never allowed)")
-        words = text.split()
-        if not (3 <= len(words) <= 5):
-            fail(f"caption {i}: {len(words)} words, must be 3-5: {text!r}")
-        start, end = float(cap["start"]), float(cap["end"])
-        if cap.get("word_starts"):
-            if len(cap["word_starts"]) != len(cap["text"].split()):
-                fail(f"caption {i}: word_starts length != word count")
-            if end - start < 0.5:
-                fail(f"caption {i}: word-synced duration {end - start}s, must be >= 0.5s")
-        elif end - start < 1.5:
-            fail(f"caption {i}: duration {end - start}s, must be >= 1.5s")
-        if prev_end is not None and start < prev_end - 1e-9:
-            fail(f"caption {i}: overlaps previous caption")
-        if i == 0 and start != 0.0:
-            fail("first caption must start at 0.0s (no slow opening)")
-        keyword = cap.get("keyword")
-        if keyword and clean_word(keyword).lower() not in [
-            clean_word(w).lower() for w in words
-        ]:
-            fail(f"caption {i}: keyword {keyword!r} is not a word in {text!r}")
         style = cap.get("style", "standard")
         if style not in ("punch", "standard", "list", "split", "question", "quick"):
             fail(f"caption {i}: unknown style {style!r}")
@@ -105,7 +119,6 @@ def main():
         bottom = cap.get("bottom_px", 670)
         if not (670 <= float(bottom) <= 850):
             fail(f"caption {i}: bottom_px {bottom} outside 670-850 (safe band)")
-        prev_end = end
 
     total = max(float(c["end"]) for c in captions)
 
@@ -189,9 +202,8 @@ def main():
     )
 
     # Vendored assets, embedded so renders are reproducible offline.
-    # Project root is the parent of tools/.
-    project_root = Path(__file__).resolve().parent.parent
-    font_path = project_root / "assets" / "fonts" / "ArchivoBlack-Regular.ttf"
+    # Project root and font_path were resolved above (the width assert
+    # already failed if Archivo Black is missing).
     if font_path.exists():
         font_b64 = base64.b64encode(font_path.read_bytes()).decode("ascii")
         font_face = (
@@ -201,6 +213,21 @@ def main():
         )
     else:
         font_face = "/* Archivo Black missing, falling back to DejaVu Sans Bold */"
+    # Anton is embedded too, for the date-card / hook-text injectors
+    # (pipeline-v2/render/date_cards.py, hook_text.py): their CSS
+    # specifies Anton 64px/72px, and without the vendored font the
+    # cards would render in the DejaVu fallback. Unused when a video
+    # stages no cards or hook text.
+    anton_path = project_root / "assets" / "fonts" / "Anton-Regular.ttf"
+    if anton_path.exists():
+        anton_b64 = base64.b64encode(anton_path.read_bytes()).decode("ascii")
+        anton_face = (
+            "@font-face { font-family: 'Anton'; "
+            f"src: url(data:font/ttf;base64,{anton_b64}) format('truetype'); "
+            "font-weight: 400; font-display: swap; }"
+        )
+    else:
+        anton_face = "/* Anton missing — date cards / hook text would fall back to DejaVu Sans Bold */"
     gsap_path = project_root / "assets" / "gsap.min.js"
     if gsap_path.exists():
         gsap_tag = f"<script>\n{gsap_path.read_text(encoding='utf-8')}\n</script>"
@@ -215,6 +242,7 @@ def main():
     {gsap_tag}
     <style>
       {font_face}
+      {anton_face}
       * {{ margin: 0; padding: 0; box-sizing: border-box; }}
       html, body {{
         margin: 0; width: 1080px; height: 1920px; overflow: hidden;
