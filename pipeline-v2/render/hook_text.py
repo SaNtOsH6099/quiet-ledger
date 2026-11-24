@@ -141,9 +141,17 @@ def load(path):
 
 
 def inject(html, hook):
-    """Return html with the hook text injected. Refuses to run twice."""
+    """Return html with the hook text injected. Refuses to run twice.
+    Format-agnostic (Hormozi and legacy): the CSS anchor is the end
+    of the <style> block, the div insertion is depth-counted from the
+    last caption div, and the tweens go before the timeline
+    registration — all of which exist in both compositions."""
     if "hooktext" in html:
         raise ValueError("HTML already has a hook text — refusing to inject twice")
+    if "font-family: 'Anton'" not in html:
+        raise ValueError(
+            "no Anton @font-face in the HTML — the hook text specifies "
+            "Anton 72px and would render in the fallback font")
     text, start, end, size_px, bottom_px = hook
     n_caps = html.count('class="clip caption"')
     if n_caps < 1:
@@ -153,7 +161,11 @@ def inject(html, hook):
     if not (plate_only or "background: #0a0a0a;" in html):
         raise ValueError("cannot detect variant from page background")
 
-    # 1. CSS rule, after the .yl rule (last rule in the <style> block).
+    # 1. CSS rule, at the end of the <style> block. (Was anchored on
+    # the Hormozi .yl rule; the legacy composition has no .yl rule, so
+    # the anchor is the format-agnostic </style>. .hooktext is a
+    # distinct class with no competing rules, so its position in the
+    # block does not change rendering.)
     if plate_only:
         hook_css = (
             "      .hooktext {\n"
@@ -181,10 +193,9 @@ def inject(html, hook):
             f"        text-shadow: {SHADOW};\n"
             "      }\n"
         )
-    anchor = '      .yl { display: inline-block; position: absolute; left: 0; top: 0; color: '
-    idx = html.index(anchor)
-    line_end = html.index("\n", idx) + 1
-    html = html[:line_end] + hook_css + html[line_end:]
+    marker = "</style>"
+    idx = html.index(marker)
+    html = html[:idx] + hook_css + html[idx:]
 
     # 2. Hook-text div, after the last caption div inside #root.
     # The caption divs contain nested <div class="line"> elements, so
