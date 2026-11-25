@@ -6,21 +6,18 @@ Usage:
 
     With the optional fourth argument "plate", build the PLATE-ONLY
     variant: white page (multiply no-op), caption text invisible
-    (transparent, no stroke), no raking light — and a dark plate behind
-    every caption word (same rgba(0,0,0,0.72) + border-radius +
-    box-shadow spread as the date-card plates and the Hormozi word
-    plates), so the multiply blend darkens the footage behind the words
-    and behind the date cards the pipeline injector adds, and nowhere
-    else. The caption divs and their tweens stay (the injectors need
-    >=1 caption div and the timeline registration); the word plates pop
-    in with the words on the same timeline. Hook text is NOT injected
-    into the plate variant (the wrapper passes hook_text_path=None):
-    it sits over dark footage and needs no plate, and the fix is scoped
-    to date cards + captions. Provenance: 68 Gate 4 F1 (date-card
-    plates, 2026-11-25) and fix round 2 (caption word plates, same
-    day) — plateless white text over bright picture is unreadable
-    (worst 1.21:1 on the silver car hood), and a screen blend cannot
-    darken footage.
+    (transparent, no stroke), no raking light — and NO plate behind
+    the caption words. The plate layer carries ONLY the date-card
+    plates the pipeline injector adds, so the multiply blend darkens
+    the footage behind the date cards and nowhere else. The caption
+    divs and their tweens stay (the injectors need >=1 caption div
+    and the timeline registration). Hook text is NOT injected into
+    the plate variant (the wrapper passes hook_text_path=None): it
+    sits over dark footage and needs no plate. Provenance: 68 Gate 4
+    F1 (date-card plates, 2026-11-25). Caption word plates were live
+    briefly from the 68 Gate 4 fix round 2 the same day and REMOVED
+    2026-11-25 per user direction — captions keep only their native
+    outline (white text + black outline), like before.
 
 Input JSON: a list of captions, each with:
     start (seconds, float), end (seconds, float),
@@ -257,14 +254,15 @@ def main():
     else:
         gsap_tag = '<script src="https://cdn.jsdelivr.net/npm/gsap@3.15.0/dist/gsap.min.js"></script>'
 
-    # Plate-only variant (68 Gate 4 F1 + fix round 2, 2026-11-25): white
+    # Plate-only variant (68 Gate 4 F1, 2026-11-25; caption word plates
+    # REMOVED 2026-11-25 per user direction — captions keep only their
+    # native outline, white text + black outline, like before): white
     # page (multiply no-op), caption text invisible (transparent, no
-    # stroke), no raking light, and a dark plate behind every caption
-    # word — so the layer is white outside the word plates and the
-    # date-card plates the injector adds, and the multiply darkens the
-    # footage ONLY behind the words and the cards. The caption divs and
-    # their tweens stay (the injectors need >=1 caption div and the
-    # timeline registration); the word plates pop in with the words.
+    # stroke), no raking light, NO plate behind caption words — so the
+    # layer is white outside the date-card plates the injector adds,
+    # and the multiply darkens the footage ONLY behind the cards. The
+    # caption divs and their tweens stay (the injectors need >=1 caption
+    # div and the timeline registration).
     page_bg = "#ffffff" if plate_only else "#0a0a0a"
     caption_color = "transparent" if plate_only else "#ffffff"
     caption_shadow = "none" if plate_only else (
@@ -273,17 +271,12 @@ def main():
         "          0 6px 16px rgba(0, 0, 0, 0.85)"
     )
     keyword_color = "transparent" if plate_only else GOLD
-    # Per-word plates (Hormozi pattern, same rgba + spread): each word
-    # span carries its own dark bar; adjacent words merge into one
-    # continuous bar per line as they pop in. The text variant's rule
-    # stays byte-identical to v2 (no trailing space when empty).
-    word_rule = (
-        ".word { display: inline-block;\n"
-        "        background: rgba(0, 0, 0, 0.72);\n"
-        "        border-radius: 0.14em;\n"
-        "        box-shadow: 0 0 0 0.10em rgba(0, 0, 0, 0.72); }"
-        if plate_only else ".word { display: inline-block; }"
-    )
+    # No per-word plates in either variant (user direction 2026-11-25):
+    # caption words keep only their native outline in the text layer;
+    # the plate layer carries date-card plates only. The Hormozi-pattern
+    # word plate (rgba(0,0,0,0.72) background + box-shadow spread) was
+    # live 2026-11-25 from the 68 Gate 4 fix round 2 and is removed here.
+    word_rule = ".word { display: inline-block; }"
     light_div = "" if plate_only else (
         f'      <div id="light" class="clip" data-start="0" data-duration="{total}" data-track-index="99"></div>\n'
     )
