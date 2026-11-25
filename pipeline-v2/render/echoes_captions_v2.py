@@ -86,11 +86,19 @@ FORMATS
                    v1 built locally from the same file.
 
 PLATES: the builder renders TWO layers (Hormozi: per-word plates;
-legacy: date-card plates ONLY — caption word plates were live
-briefly from the 68 Gate 4 fix round 2 (2026-11-25) and REMOVED the
-same day per user direction; captions keep only their native outline.
-The legacy plate variant carries no caption text, so the multiply
-darkens the footage only behind the cards). The text
+legacy: date-card plates + the caption outline ring ONLY — caption
+word plates were live briefly from the 68 Gate 4 fix round 2
+(2026-11-25) and REMOVED the same day per user direction; captions
+keep only their native outline, a thin black ring around each word,
+no background bar. The legacy plate variant carries the caption text
+as transparent glyphs with the 3px 8-direction outline shadow, so
+the multiply darkens the footage ONLY in the outline ring and
+behind the cards. The outline MUST live here: the text layer is
+screen-blended, and a black shadow is invisible in a screen blend
+(screen can only lighten) — the v3/v5 renders proved it (67 v3
+t=60: white letters meet the bright wall with no dark dip at all).
+The text layer's own shadow is therefore invisible in the composite;
+the plate layer's ring is the only outline the viewer sees.) The text
 layer (black background, screen-blended over footage) is --out.
 The plate layer (white background, dark plates only) is written
 next to it as captions-plates-24fps.mp4 and rides the same
