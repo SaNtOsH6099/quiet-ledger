@@ -85,7 +85,10 @@ FORMATS
                    build, so the render matches the approved captioned
                    v1 built locally from the same file.
 
-PLATES (Hormozi only): the builder renders TWO layers. The text
+PLATES: the builder renders TWO layers (Hormozi: per-word plates;
+legacy: date-card plates only, since the 68 Gate 4 F1 fix 2026-11-25 —
+the legacy plate variant carries no caption text, so the multiply
+darkens the footage only behind the cards). The text
 layer (black background, screen-blended over footage) is --out.
 The plate layer (white background, dark plates only) is written
 next to it as captions-plates-24fps.mp4 and rides the same
@@ -98,8 +101,12 @@ lighten). The v2 assemble step DOES consume the plate layer
 the follow-up this paragraph once waited for has landed; the v1
 README's note to the contrary is stale.
 
-DATE CARDS (Hormozi only, optional): a Director-plan date card is a
+DATE CARDS (optional): a Director-plan date card is a
 top-centre title card on a time jump (Anton 64px, top 180px, 3.0s).
+In the text layer the card is white text with the heavy black
+stroke; in the plate layer the card is transparent text on a dark
+plate bar (rgba(0,0,0,0.72)), so the multiply darkens the footage
+there.
 The captions.json schema has no date-card entry, so the cards are
 staged separately as date_cards.json (optional; absent = no cards)
 and injected into BOTH caption layers by pipeline-v2/render/
@@ -111,14 +118,15 @@ the last caption and they never appear) plus verification asserts.
 Without this step a GitHub render silently drops the cards, which
 are a locked Gate 3 element — that is what 69 found at Gate 4.
 
-HOOK TEXT (Hormozi only, optional): the Director-plan hook text is
+HOOK TEXT (optional): the Director-plan hook text is
 the approved on-screen text on the opening shot (Director plan §6):
 a second fact, not duplicating the spoken line, gold #FFD166, in the
 lower-third safe zone for the full shot (e.g. 63: "NO ONE EVER CAME
 FORWARD", 0.0-8.7s). The captions.json schema has no hook-text entry,
 so it is staged separately as hook_text.json (optional; absent = no
-hook text) and injected into BOTH caption layers by
-pipeline-v2/render/hook_text.py, after the builder writes the
+hook text) and injected into the text caption layer (and into BOTH
+layers for Hormozi — transparent text + plate bar in the plate layer)
+by pipeline-v2/render/hook_text.py, after the builder writes the
 composition and before the render runs — the same class as the date
 cards, same depth-counted insertion + verification asserts. Without
 this step a GitHub render silently drops the hook text, which is a
@@ -376,15 +384,31 @@ def main():
             fail(f"--mix file not found: {args.mix}")
     os.makedirs(os.path.dirname(os.path.abspath(args.out)), exist_ok=True)
     if fmt == "legacy":
-        # One layer (legacy has no plates). Date cards and hook text
-        # are injected into the legacy composition by the same
-        # injectors (format-agnostic since 2026-11-24); --mix is not
-        # passed — the legacy builder rejects extra argv.
+        # Two layers (68 Gate 4 F1, 2026-11-25): the text layer plus a
+        # PLATE layer carrying ONLY the date-card plates. The legacy
+        # builder's plate variant renders a white page with invisible
+        # caption text, so the multiply darkens the footage behind the
+        # cards and nowhere else (a plateless white card over bright
+        # sky is unreadable, and a screen blend cannot darken — the
+        # 68 v1 defect). Hook text is NOT injected into the plate
+        # layer: it sits over dark footage and needs no plate, and the
+        # fix is scoped to date cards. Date cards and hook text are
+        # injected into the text composition by the same injectors
+        # (format-agnostic since 2026-11-24); --mix is not passed —
+        # the legacy builder rejects extra argv.
         rendered = render_layer(build, args.captions_json, project_dir, [],
                                 mix=None, date_cards_path=args.date_cards,
                                 hook_text_path=args.hook_text)
         os.replace(rendered, args.out)
-        print(f"wrote {args.out}")
+        print(f"wrote {args.out} (legacy text layer)")
+        plate_out = os.path.join(
+            os.path.dirname(os.path.abspath(args.out)),
+            "captions-plates-24fps.mp4")
+        rendered = render_layer(build, args.captions_json, project_dir, ["plate"],
+                                mix=None, date_cards_path=args.date_cards,
+                                hook_text_path=None)
+        os.replace(rendered, plate_out)
+        print(f"wrote {plate_out} (legacy plate layer)")
         return 0
     # Hormozi: two layers. The text layer is --out (the interface
     # stays stable); the plate layer goes next to it and rides the
