@@ -86,10 +86,11 @@ FORMATS
                    v1 built locally from the same file.
 
 PLATES: the builder renders TWO layers (Hormozi: per-word plates;
-legacy: date-card plates + caption word plates, since the 68 Gate 4
-fixes 2026-11-25 — the legacy plate variant carries no caption text
-but a dark plate behind every caption word, so the multiply darkens
-the footage only behind the words and the cards). The text
+legacy: date-card plates ONLY — caption word plates were live
+briefly from the 68 Gate 4 fix round 2 (2026-11-25) and REMOVED the
+same day per user direction; captions keep only their native outline.
+The legacy plate variant carries no caption text, so the multiply
+darkens the footage only behind the cards). The text
 layer (black background, screen-blended over footage) is --out.
 The plate layer (white background, dark plates only) is written
 next to it as captions-plates-24fps.mp4 and rides the same
@@ -385,17 +386,16 @@ def main():
             fail(f"--mix file not found: {args.mix}")
     os.makedirs(os.path.dirname(os.path.abspath(args.out)), exist_ok=True)
     if fmt == "legacy":
-        # Two layers (68 Gate 4 F1 + fix round 2, 2026-11-25): the text
-        # layer plus a PLATE layer carrying the date-card plates AND
-        # the caption word plates. The legacy builder's plate variant
-        # renders a white page with invisible caption text and a dark
-        # plate behind every caption word, so the multiply darkens the
-        # footage behind the words and the cards and nowhere else
-        # (plateless white text over bright picture is unreadable —
-        # worst 1.21:1 on the silver car hood — and a screen blend
-        # cannot darken). Hook text is NOT injected into the plate
-        # layer: it sits over dark footage and needs no plate, and the
-        # fix is scoped to date cards + captions. Date cards and hook
+        # Two layers (68 Gate 4 F1, 2026-11-25): the text layer plus a
+        # PLATE layer carrying the date-card plates ONLY. Caption word
+        # plates were live briefly from the 68 fix round 2 and REMOVED
+        # 2026-11-25 per user direction — captions keep only their
+        # native outline (white text + black outline), like before.
+        # The legacy builder's plate variant renders a white page with
+        # invisible caption text and no plate behind the words, so the
+        # multiply darkens the footage behind the cards and nowhere
+        # else. Hook text is NOT injected into the plate layer: it sits
+        # over dark footage and needs no plate. Date cards and hook
         # text are injected into the text composition by the same
         # injectors (format-agnostic since 2026-11-24); --mix is not
         # passed — the legacy builder rejects extra argv.
