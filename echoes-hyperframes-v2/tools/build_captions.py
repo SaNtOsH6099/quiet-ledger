@@ -2,7 +2,23 @@
 """Build an Echoes Originals HyperFrames caption composition from JSON.
 
 Usage:
-    python3 tools/build_captions.py captions/test-captions.json index.html
+    python3 tools/build_captions.py captions/test-captions.json index.html [plate]
+
+    With the optional fourth argument "plate", build the PLATE-ONLY
+    variant: white page (multiply no-op), caption text invisible
+    (transparent, no stroke), no raking light — so the layer is pure
+    white outside the date-card plates the pipeline injector adds, and
+    the multiply blend darkens the footage ONLY behind the cards. The
+    caption divs and their tweens stay (the injectors need >=1 caption
+    div and the timeline registration); they are invisible, so they
+    change nothing. Hook text is NOT injected into the plate variant
+    (the wrapper passes hook_text_path=None): it sits over dark footage
+    and needs no plate, and the fix is scoped to date cards.
+    See build_captions_hormozi.py for the same pattern (per-word plates
+    there; date-card plates only here — legacy captions keep their
+    plateless white-text look). Provenance: 68 Gate 4 F1, 2026-11-25 —
+    a plateless white date card over bright sky is unreadable, and a
+    screen blend cannot darken footage.
 
 Input JSON: a list of captions, each with:
     start (seconds, float), end (seconds, float),
@@ -80,9 +96,10 @@ def clean_word(word):
 
 
 def main():
-    if len(sys.argv) != 3:
-        fail("usage: build_captions.py <captions.json> <output.html>")
+    if len(sys.argv) not in (3, 4) or (len(sys.argv) == 4 and sys.argv[3] != "plate"):
+        fail("usage: build_captions.py <captions.json> <output.html> [plate]")
     captions_path, output_path = Path(sys.argv[1]), Path(sys.argv[2])
+    plate_only = len(sys.argv) == 4
     captions = json.loads(captions_path.read_text(encoding="utf-8"))
     if not isinstance(captions, list) or not captions:
         fail("captions file must be a non-empty JSON list")
@@ -197,9 +214,13 @@ def main():
 
     # Raking light: a slow, deterministic sweep across the frame, purely
     # decorative background motion so no shot sits completely static.
-    timeline_lines.append(
-        f'      tl.fromTo("#light", {{x: -1080}}, {{x: 1080, duration: {total}, ease: "none"}}, 0);'
-    )
+    # Omitted in the plate variant: the layer must be pure white
+    # outside the date-card plates, and the warm sweep would
+    # multiply-darken as it crosses.
+    if not plate_only:
+        timeline_lines.append(
+            f'      tl.fromTo("#light", {{x: -1080}}, {{x: 1080, duration: {total}, ease: "none"}}, 0);'
+        )
 
     # Vendored assets, embedded so renders are reproducible offline.
     # Project root and font_path were resolved above (the width assert
@@ -234,6 +255,25 @@ def main():
     else:
         gsap_tag = '<script src="https://cdn.jsdelivr.net/npm/gsap@3.15.0/dist/gsap.min.js"></script>'
 
+    # Plate-only variant (68 Gate 4 F1, 2026-11-25): white page (multiply
+    # no-op), caption text invisible (transparent, no stroke), no raking
+    # light — so the layer is pure white outside the date-card plates
+    # the injector adds, and the multiply darkens the footage ONLY
+    # behind the cards. The caption divs and their tweens stay (the
+    # injectors need >=1 caption div and the timeline registration);
+    # they are invisible, so they change nothing.
+    page_bg = "#ffffff" if plate_only else "#0a0a0a"
+    caption_color = "transparent" if plate_only else "#ffffff"
+    caption_shadow = "none" if plate_only else (
+        "3px 0 0 #000, -3px 0 0 #000, 0 3px 0 #000, 0 -3px 0 #000,\n"
+        "          3px 3px 0 #000, -3px -3px 0 #000, 3px -3px 0 #000, -3px 3px 0 #000,\n"
+        "          0 6px 16px rgba(0, 0, 0, 0.85)"
+    )
+    keyword_color = "transparent" if plate_only else GOLD
+    light_div = "" if plate_only else (
+        f'      <div id="light" class="clip" data-start="0" data-duration="{total}" data-track-index="99"></div>\n'
+    )
+
     html_doc = f"""<!doctype html>
 <html lang="en" data-resolution="portrait">
   <head>
@@ -246,7 +286,7 @@ def main():
       * {{ margin: 0; padding: 0; box-sizing: border-box; }}
       html, body {{
         margin: 0; width: 1080px; height: 1920px; overflow: hidden;
-        background: #0a0a0a;
+        background: {page_bg};
       }}
       #root {{ width: 100%; height: 100%; position: relative; }}
       #light {{
@@ -260,19 +300,16 @@ def main():
         font-family: "Archivo Black", "DejaVu Sans", "Arial Black", sans-serif;
         font-size: 70px; font-weight: 400; line-height: 1.12;
         letter-spacing: -0.01em;
-        color: #ffffff;
-        text-shadow: 3px 0 0 #000, -3px 0 0 #000, 0 3px 0 #000, 0 -3px 0 #000,
-          3px 3px 0 #000, -3px -3px 0 #000, 3px -3px 0 #000, -3px 3px 0 #000,
-          0 6px 16px rgba(0, 0, 0, 0.85);
+        color: {caption_color};
+        text-shadow: {caption_shadow};
       }}
       .word {{ display: inline-block; }}
-      .keyword {{ color: {GOLD}; }}
+      .keyword {{ color: {keyword_color}; }}
     </style>
   </head>
   <body>
     <div id="root" data-composition-id="main" data-start="0" data-duration="{total}" data-width="1080" data-height="1920">
-      <div id="light" class="clip" data-start="0" data-duration="{total}" data-track-index="99"></div>
-{chr(10).join(caption_divs)}
+{light_div}{chr(10).join(caption_divs)}
     </div>
     <script>
       const tl = gsap.timeline({{ paused: true }});
@@ -285,7 +322,8 @@ def main():
 </html>
 """
     output_path.write_text(html_doc, encoding="utf-8")
-    print(f"Wrote {output_path} ({len(captions)} captions, {total}s total)")
+    print(f"Wrote {output_path} ({len(captions)} captions, {total}s total"
+          f"{' [plate]' if plate_only else ''})")
 
 
 if __name__ == "__main__":
