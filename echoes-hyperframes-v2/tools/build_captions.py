@@ -256,26 +256,42 @@ def main():
 
     # Plate-only variant (68 Gate 4 F1, 2026-11-25; caption word plates
     # REMOVED 2026-11-25 per user direction — captions keep only their
-    # native outline, white text + black outline, like before): white
-    # page (multiply no-op), caption text invisible (transparent, no
-    # stroke), no raking light, NO plate behind caption words — so the
-    # layer is white outside the date-card plates the injector adds,
-    # and the multiply darkens the footage ONLY behind the cards. The
-    # caption divs and their tweens stay (the injectors need >=1 caption
-    # div and the timeline registration).
+    # native outline, white text + thin black outline, like before):
+    # white page (multiply no-op), caption text invisible
+    # (transparent) BUT carrying the 3px 8-direction outline shadow —
+    # so the layer is white outside the date-card plates the injector
+    # adds and the thin outline ring around each caption word, and the
+    # multiply darkens the footage ONLY behind the cards and in the
+    # outline ring. The caption divs and their tweens stay (the
+    # injectors need >=1 caption div and the timeline registration).
+    # WHY the outline lives here: the text layer is screen-blended,
+    # and a black shadow is invisible in a screen blend (screen can
+    # only lighten) — the v3/v5 renders proved it (67 v3 t=60: white
+    # letters meet the bright wall with no dark dip at all). The
+    # visible thin outline MUST come from this multiply layer. The
+    # outline ring is the glyph + 3px halo with a transparent interior,
+    # so the screen-blended white text covers the interior exactly and
+    # only the ring shows — no background bar. (Fix 2026-11-25, user
+    # direction: remove the extra black background, keep the outline.)
+    outline_shadow = (
+        "3px 0 0 #000, -3px 0 0 #000, 0 3px 0 #000, 0 -3px 0 #000,\n"
+        "          3px 3px 0 #000, -3px -3px 0 #000, 3px -3px 0 #000, -3px 3px 0 #000"
+    )
     page_bg = "#ffffff" if plate_only else "#0a0a0a"
     caption_color = "transparent" if plate_only else "#ffffff"
-    caption_shadow = "none" if plate_only else (
-        "3px 0 0 #000, -3px 0 0 #000, 0 3px 0 #000, 0 -3px 0 #000,\n"
-        "          3px 3px 0 #000, -3px -3px 0 #000, 3px -3px 0 #000, -3px 3px 0 #000,\n"
+    caption_shadow = outline_shadow if plate_only else (
+        outline_shadow + ",\n"
         "          0 6px 16px rgba(0, 0, 0, 0.85)"
     )
     keyword_color = "transparent" if plate_only else GOLD
     # No per-word plates in either variant (user direction 2026-11-25):
-    # caption words keep only their native outline in the text layer;
-    # the plate layer carries date-card plates only. The Hormozi-pattern
-    # word plate (rgba(0,0,0,0.72) background + box-shadow spread) was
-    # live 2026-11-25 from the 68 Gate 4 fix round 2 and is removed here.
+    # caption words keep only their native outline — rendered as the
+    # outline ring in the plate layer (multiply), NOT in the text layer
+    # (the text layer's shadow is invisible in a screen blend). The
+    # plate layer carries the outline ring + date-card plates, no word
+    # bars. The Hormozi-pattern word plate (rgba(0,0,0,0.72) background
+    # + box-shadow spread) was live 2026-11-25 from the 68 Gate 4 fix
+    # round 2 and is removed here.
     word_rule = ".word { display: inline-block; }"
     light_div = "" if plate_only else (
         f'      <div id="light" class="clip" data-start="0" data-duration="{total}" data-track-index="99"></div>\n'
