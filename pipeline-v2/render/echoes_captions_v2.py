@@ -86,9 +86,10 @@ FORMATS
                    v1 built locally from the same file.
 
 PLATES: the builder renders TWO layers (Hormozi: per-word plates;
-legacy: date-card plates only, since the 68 Gate 4 F1 fix 2026-11-25 —
-the legacy plate variant carries no caption text, so the multiply
-darkens the footage only behind the cards). The text
+legacy: date-card plates + caption word plates, since the 68 Gate 4
+fixes 2026-11-25 — the legacy plate variant carries no caption text
+but a dark plate behind every caption word, so the multiply darkens
+the footage only behind the words and the cards). The text
 layer (black background, screen-blended over footage) is --out.
 The plate layer (white background, dark plates only) is written
 next to it as captions-plates-24fps.mp4 and rides the same
@@ -384,18 +385,20 @@ def main():
             fail(f"--mix file not found: {args.mix}")
     os.makedirs(os.path.dirname(os.path.abspath(args.out)), exist_ok=True)
     if fmt == "legacy":
-        # Two layers (68 Gate 4 F1, 2026-11-25): the text layer plus a
-        # PLATE layer carrying ONLY the date-card plates. The legacy
-        # builder's plate variant renders a white page with invisible
-        # caption text, so the multiply darkens the footage behind the
-        # cards and nowhere else (a plateless white card over bright
-        # sky is unreadable, and a screen blend cannot darken — the
-        # 68 v1 defect). Hook text is NOT injected into the plate
+        # Two layers (68 Gate 4 F1 + fix round 2, 2026-11-25): the text
+        # layer plus a PLATE layer carrying the date-card plates AND
+        # the caption word plates. The legacy builder's plate variant
+        # renders a white page with invisible caption text and a dark
+        # plate behind every caption word, so the multiply darkens the
+        # footage behind the words and the cards and nowhere else
+        # (plateless white text over bright picture is unreadable —
+        # worst 1.21:1 on the silver car hood — and a screen blend
+        # cannot darken). Hook text is NOT injected into the plate
         # layer: it sits over dark footage and needs no plate, and the
-        # fix is scoped to date cards. Date cards and hook text are
-        # injected into the text composition by the same injectors
-        # (format-agnostic since 2026-11-24); --mix is not passed —
-        # the legacy builder rejects extra argv.
+        # fix is scoped to date cards + captions. Date cards and hook
+        # text are injected into the text composition by the same
+        # injectors (format-agnostic since 2026-11-24); --mix is not
+        # passed — the legacy builder rejects extra argv.
         rendered = render_layer(build, args.captions_json, project_dir, [],
                                 mix=None, date_cards_path=args.date_cards,
                                 hook_text_path=args.hook_text)
